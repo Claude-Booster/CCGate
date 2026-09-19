@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hitRatioFloor":              {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.85},
+    "minRequestsForRatio":        {"type": "integer", "minimum": 1,                  "default": 10},
+    "coldRecacheWarnTokens":      {"type": "integer", "minimum": 0,                  "default": 100000},
+    "compactAdviseAt":            {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.80},
+    "unboundedOutputTokens":      {"type": "integer", "minimum": 0,                  "default": 10000},
+    "maxNoticesPerSession":       {"type": "integer", "minimum": 0,                  "default": 4},
+    "bigFileLines":               {"type": "integer", "minimum": 0,                  "default": 500},
+    "staleTimeMs":                {"type": "integer", "minimum": 0,                  "default": 600000},
+    "staleFiles":                 {"type": "integer", "minimum": 0,                  "default": 8},
+    "staleTokenRatio":            {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.10},
+    "readCacheEnabled":           {"type": "boolean",                                "default": false},
+    "skillListingBudgetFraction": {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.01},
+    "bashRewriteRules": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["prefix", "filter"],
+        "additionalProperties": false,
+        "properties": {
+          "prefix": {"type": "string", "minLength": 1},
+          "filter": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
