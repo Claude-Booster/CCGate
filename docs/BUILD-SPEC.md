@@ -137,7 +137,15 @@ cost.total_cost_usd
 rate_limits.five_hour.used_percentage        (subscription only)
 ```
 
-Version floors: `prompt_cache` requires Claude Code ≥ 2.1.251; `last_miss_cause` and `miss_causes` require ≥ 2.1.260. Below those floors `ccgate` falls back to transcript-derived hit ratio and **suppresses all cause attribution** rather than guessing.
+Version floors produce three distinct capability bands:
+
+| Band | Version | `prompt_cache` | `miss_causes` | Capability |
+|---|---|---|---|---|
+| 1 — pre-cache | < 2.1.251 | absent | absent | Transcript-derived hit ratio only; all cause attribution suppressed |
+| 2 — cache, no causes | 2.1.251–2.1.259 | present | absent | Live hit ratio from status-line; cause attribution suppressed |
+| 3 — full | ≥ 2.1.260 | present | present | Full functionality |
+
+**Discriminator rule:** use `miss_causes` field presence (not `last_miss_cause`) to detect the 2.1.260 floor. `miss_causes` is a dict present and non-null from session start on ≥ 2.1.260, even before any miss occurs. `last_miss_cause` is only populated after a miss and is therefore absent in clean sessions regardless of version — using it as a discriminator produces false floor detections. Concretely: `prompt_cache` absent → Band 1; `prompt_cache` present and `miss_causes` absent → Band 2; both present → Band 3.
 
 Absence handling: `current_usage` is `null` before the first API call and again after `/compact` until the next call. `rate_limits` is absent for API-key auth. `recache_tokens_if_cold` is `null` immediately after a compaction. Treat absent ≠ zero.
 
@@ -378,7 +386,7 @@ Each gate is a script that exits 0 or 1. These run in CI on the `ccgate` repo it
 | **G8** | Determinism | same transcript set → byte-identical `miss_audit` output across 3 runs | `tests/determinism.py` |
 | **G9** | Schema conformance | all emitted JSON validates against `schema/*.json` | `tests/schema.py` |
 | **G10** | Cross-platform paths | cwd→transcript-dir encoding round-trips on POSIX and Windows fixtures | `tests/paths.py` |
-| **G11** | Version floor | absent `prompt_cache` degrades to fallback with no traceback | `tests/degrade.py` |
+| **G11** | Version floor | Band 1 (absent `prompt_cache`) degrades to transcript fallback; Band 2 (`prompt_cache` present, `miss_causes` absent) serves live hit ratio with cause attribution suppressed — both without traceback | `tests/degrade.py` |
 
 G7 is the one most likely to fail first. Python interpreter startup is 30–50 ms before any work happens. Mitigation is in §11.
 
