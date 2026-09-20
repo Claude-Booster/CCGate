@@ -229,5 +229,35 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print(_render_table(report))
 
-    if args.assert_mode and report["summary"]["avoidable_usd"] > 0:
-        sys.exit(1)
+    if args.assert_mode:
+        failures: list[str] = []
+        s = report["summary"]
+        # G4: hit ratio
+        min_reqs = config.get("minRequestsForRatio", 10)
+        floor = config.get("hitRatioFloor", 0.85)
+        if s["total_requests"] >= min_reqs and s["hit_ratio"] < floor:
+            failures.append(
+                f"G4 FAIL: hit_ratio={s['hit_ratio']:.3f} < {floor}"
+                f" ({s['total_requests'] - s['total_misses']}/{s['total_requests']} hits)"
+            )
+        # G5: zero D1.model_switch / D1.tools_changed
+        cause_map = {m["cause"]: m["count"] for m in report["misses"]}
+        g5_count = (cause_map.get(taxonomy.D1_MODEL_SWITCH, 0)
+                    + cause_map.get(taxonomy.D1_TOOLS_CHANGED, 0))
+        if g5_count > 0:
+            failures.append(
+                f"G5 FAIL: {g5_count} miss(es) of type D1.model_switch or D1.tools_changed"
+            )
+        # existing gate: any avoidable spend
+        if s["avoidable_usd"] > 0:
+            failures.append(
+                f"avoidable: ${s['avoidable_usd']:.4f} of ${s['total_usd']:.4f} session spend"
+            )
+        if failures:
+            for msg in failures:
+                print(msg, file=sys.stderr)
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
