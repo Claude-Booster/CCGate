@@ -100,6 +100,8 @@ class TestSessionEnd:
         content = reports[0].read_text()
         assert "s1" in content
         assert "net=" in content
+        assert "avoided=" in content
+        assert "injected=" in content
         assert "tool_calls=" in content
 
     def test_missing_session_exits_0(self, hook_env, tmp_path):
@@ -110,6 +112,8 @@ class TestSessionEnd:
             {"session_id": "no_session", "transcript_path": str(transcript)}, env
         )
         assert result.returncode == 0
+        # No session → no report written
+        assert not (tmp_path / "reports").exists()
 
     def test_missing_transcript_exits_0(self, hook_env, tmp_path):
         env, tmp_path = hook_env
