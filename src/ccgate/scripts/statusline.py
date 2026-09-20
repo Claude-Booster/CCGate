@@ -93,7 +93,12 @@ def render(payload: dict, config: dict) -> str:
         escalation = f"  COLD — next turn re-caches {tok_k}"
 
     elif low_ratio:
-        escalation = f"  cache {hit_ratio*100:.0f}% ↓"
+        miss_causes = pc.get("miss_causes")
+        suffix = ""
+        if isinstance(miss_causes, dict) and miss_causes:
+            top = sorted(miss_causes.items(), key=lambda kv: -kv[1])[:2]
+            suffix = " (" + ", ".join(f"{c} ×{n}" for c, n in top) + ")"
+        escalation = f"  cache {hit_ratio*100:.0f}% ↓{suffix}"
 
     line = base + escalation
     return line[:cols]
