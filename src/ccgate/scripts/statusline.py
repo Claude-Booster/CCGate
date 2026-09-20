@@ -49,6 +49,19 @@ def _safe(payload: dict, *keys, default=None):
     return v
 
 
+def _persist_snapshot(payload: dict) -> None:
+    """Write payload snapshot to ~/.ccgate/sessions/{session_id}-statusline.json."""
+    from ccgate.state import ccgate_home
+    sid = payload.get("session_id")
+    if not sid:
+        return
+    dest = ccgate_home() / "sessions" / f"{sid}-statusline.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, dest)
+
+
 def render(payload: dict, config: dict) -> str:
     """Build the status line string. Always ≤ COLUMNS chars, no newlines."""
     cols = int(os.environ.get("COLUMNS", "80"))
@@ -112,3 +125,4 @@ def main() -> None:
         payload = {}
     config = load_config()
     print(render(payload, config))
+    _persist_snapshot(payload)
