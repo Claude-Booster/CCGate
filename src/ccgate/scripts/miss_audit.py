@@ -40,18 +40,31 @@ def attribute_miss(curr: Request, prev: Request | None, ttl: int) -> str:
 
 
 def _turns_remaining_est(requests: list[Request], index: int) -> tuple[float, str]:
-    """Estimate remaining turns via rolling token-per-turn rate vs window size (§6 algorithm)."""
+    """Estimate remaining turns via rolling median of per-turn input token counts (§6).
+
+    Bootstrap constant 5 for the first 3 turns. After that, uses statistics.median
+    of all observed per-turn input_tokens to estimate remaining window capacity.
+    """
+    import statistics
     from ccgate.model import DEFAULT_WINDOW_TOKENS
+
     if index < 3:
         return 5.0, f"bootstrap constant (turn {index + 1} of session)"
-    # Use rolling average tokens-per-turn to estimate remaining capacity.
-    total_tokens = sum(r.usage.input_tokens for r in requests[:index + 1])
-    avg_tokens_per_turn = total_tokens / (index + 1)
-    if avg_tokens_per_turn <= 0:
-        return 5.0, "bootstrap constant (zero token average)"
+
+    per_turn_tokens = [r.usage.input_tokens for r in requests[: index + 1]]
+    median_tpt = statistics.median(per_turn_tokens)
+
+    if median_tpt <= 0:
+        return 5.0, "bootstrap constant (zero median token count)"
+
+    total_tokens = sum(per_turn_tokens)
     tokens_remaining = max(0, DEFAULT_WINDOW_TOKENS - total_tokens)
-    est = tokens_remaining / avg_tokens_per_turn
-    return round(est, 1), f"window remaining / rolling avg {avg_tokens_per_turn:.0f} tok/turn"
+    est = tokens_remaining / median_tpt
+    return (
+        round(est, 1),
+        f"window remaining / rolling median {median_tpt:.0f} tok/turn "
+        f"({index + 1} turns observed)",
+    )
 
 
 def run_audit(paths: list[Path], config: dict) -> dict:
