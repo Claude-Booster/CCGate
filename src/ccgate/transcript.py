@@ -134,9 +134,14 @@ _COMPACT_SIGNAL  = "/compact"
 _CLEAR_SIGNAL    = "/clear"
 
 
-def _is_compact_turn(path: Path, turn_index: int) -> bool:
-    """Check if the user message preceding turn_index contained /compact or /clear."""
-    user_turns: list[str] = []
+def _scan_compact_turns(path: Path) -> set[int]:
+    """Single-pass scan: return the set of assistant turn indices preceded by /compact or /clear.
+
+    Handles both string content and list-of-parts content. O(N) — reads the file once.
+    """
+    compact_indices: set[int] = set()
+    assistant_index = 0
+    pending_compact = False
     try:
         with path.open(encoding="utf-8") as fh:
             for line in fh:
@@ -147,18 +152,19 @@ def _is_compact_turn(path: Path, turn_index: int) -> bool:
                     e = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if e.get("type") == "user":
+                entry_type = e.get("type")
+                if entry_type == "user":
                     content = e.get("message", {}).get("content", "")
-                    user_turns.append(content if isinstance(content, str) else "")
-                elif e.get("type") == "assistant":
-                    if len(user_turns) > turn_index:
-                        break
+                    text = content if isinstance(content, str) else str(content)
+                    pending_compact = _COMPACT_SIGNAL in text or _CLEAR_SIGNAL in text
+                elif entry_type == "assistant":
+                    if pending_compact:
+                        compact_indices.add(assistant_index)
+                    assistant_index += 1
+                    pending_compact = False
     except OSError:
         pass
-    if turn_index < len(user_turns):
-        msg = user_turns[turn_index]
-        return _COMPACT_SIGNAL in msg or _CLEAR_SIGNAL in msg
-    return False
+    return compact_indices
 
 
 def classify_requests(
@@ -172,13 +178,14 @@ def classify_requests(
     MISS: re_processed > 5% of expected_cache AND > 2000 tokens.
     HIT: everything else.
     """
+    compact_indices: set[int] = (
+        _scan_compact_turns(transcript_path) if transcript_path is not None else set()
+    )
     results: list[tuple[Request, Classification]] = []
     expected_cache = 0
 
     for req in requests:
-        is_rebuild = req.is_expected_rebuild
-        if not is_rebuild and transcript_path is not None:
-            is_rebuild = _is_compact_turn(transcript_path, req.index)
+        is_rebuild = req.is_expected_rebuild or req.index in compact_indices
 
         if is_rebuild:
             results.append((req, Classification.EXPECTED_REBUILD))

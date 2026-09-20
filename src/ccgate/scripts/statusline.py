@@ -66,8 +66,15 @@ def render(payload: dict, config: dict) -> str:
     recache      = pc.get("recache_tokens_if_cold") or 0
     caching_obs  = pc.get("caching_observed", True)
 
+    low_ratio = (
+        hit_ratio is not None
+        and hit_ratio < config.get("hitRatioFloor", 0.85)
+        and requests >= config.get("minRequestsForRatio", 10)
+    )
+
+    # Suppress the inline cache% when the escalation already shows it (avoids duplication).
     cache_part = ""
-    if hit_ratio is not None:
+    if hit_ratio is not None and not low_ratio:
         cache_part = f"  ·  cache {hit_ratio*100:.0f}%"
 
     base = f"[{model_label}] {bar} {used_pct:.0f}%{cache_part}  ·  ${cost:.2f}"
@@ -85,9 +92,7 @@ def render(payload: dict, config: dict) -> str:
         tok_k = f"{recache/1000:.0f}K" if recache < 1_000_000 else f"{recache/1e6:.1f}M"
         escalation = f"  COLD — next turn re-caches {tok_k}"
 
-    elif (hit_ratio is not None
-          and hit_ratio < config.get("hitRatioFloor", 0.85)
-          and requests >= config.get("minRequestsForRatio", 10)):
+    elif low_ratio:
         escalation = f"  cache {hit_ratio*100:.0f}% ↓"
 
     line = base + escalation
