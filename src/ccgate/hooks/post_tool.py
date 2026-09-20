@@ -44,53 +44,56 @@ def main() -> None:
     tool_response = payload.get("tool_response", "")
     model = payload.get("model")
 
-    config = load_config()
-    unbounded = config.get("unboundedOutputTokens", 10_000)
-    max_notices = config.get("maxNoticesPerSession", 4)
-
-    response_chars = len(tool_response)
-    tokens_est = response_chars // 4
-    ts = datetime.now(timezone.utc).isoformat()
-
     notice = ""
-    with acquire_lock(session_id):
-        session = read_session(session_id) or _default_session(session_id)
+    try:
+        config = load_config()
+        unbounded = config.get("unboundedOutputTokens", 10_000)
+        max_notices = config.get("maxNoticesPerSession", 4)
 
-        if model and not session.get("model"):
-            session["model"] = model
+        response_chars = len(tool_response)
+        tokens_est = response_chars // 4
+        ts = datetime.now(timezone.utc).isoformat()
 
-        seq = len(session["tool_calls"]) + 1
-        record = {
-            "seq": seq,
-            "tool": tool_name,
-            "response_chars": response_chars,
-            "tokens_est": tokens_est,
-            "notice_bytes": 0,
-            "ts": ts,
-        }
-        session["tool_calls"].append(record)
-        _update_profile(session["tool_profile"], tool_name, tokens_est)
+        with acquire_lock(session_id):
+            session = read_session(session_id) or _default_session(session_id)
 
-        # Read statusline snapshot if available
-        snap_path = ccgate_home() / "sessions" / f"{session_id}-statusline.json"
-        if snap_path.exists():
-            try:
-                session["statusline_snapshot"] = json.loads(
-                    snap_path.read_text(encoding="utf-8")
+            if model and not session.get("model"):
+                session["model"] = model
+
+            seq = len(session["tool_calls"]) + 1
+            record = {
+                "seq": seq,
+                "tool": tool_name,
+                "response_chars": response_chars,
+                "tokens_est": tokens_est,
+                "notice_bytes": 0,
+                "ts": ts,
+            }
+            session["tool_calls"].append(record)
+            _update_profile(session["tool_profile"], tool_name, tokens_est)
+
+            # Read statusline snapshot if available
+            snap_path = ccgate_home() / "sessions" / f"{session_id}-statusline.json"
+            if snap_path.exists():
+                try:
+                    session["statusline_snapshot"] = json.loads(
+                        snap_path.read_text(encoding="utf-8")
+                    )
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # AdditionalContext gate (I2 — only when unbounded output detected)
+            if tokens_est > unbounded and session["notices_emitted"] < max_notices:
+                notice = (
+                    f"{tool_name} returned ~{tokens_est:,} tokens"
+                    " — consider a tighter offset/limit."
                 )
-            except (json.JSONDecodeError, OSError):
-                pass
+                session["notices_emitted"] += 1
+                session["tool_calls"][-1]["notice_bytes"] = len(notice)
 
-        # AdditionalContext gate (I2 — only when unbounded output detected)
-        if tokens_est > unbounded and session["notices_emitted"] < max_notices:
-            notice = (
-                f"{tool_name} returned ~{tokens_est:,} tokens"
-                " — consider a tighter offset/limit."
-            )
-            session["notices_emitted"] += 1
-            session["tool_calls"][-1]["notice_bytes"] = len(notice)
-
-        write_session(session_id, session)
+            write_session(session_id, session)
+    except Exception:
+        pass
 
     if notice:
         print(json.dumps({"hookSpecificOutput": {"additionalContext": notice}}))
