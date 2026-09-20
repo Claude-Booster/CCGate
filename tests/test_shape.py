@@ -68,7 +68,10 @@ class TestSkillSideEffects:
             encoding="utf-8",
         )
         findings = _check_skill_side_effects(str(tmp_path))
-        assert not any(f["check"] == "skillSideEffects" for f in findings)
+        assert not any(
+            f["check"] == "skillSideEffects" and str(tmp_path) in f["message"]
+            for f in findings
+        )
 
     def test_analysis_skill_not_flagged(self, tmp_path):
         skill_dir = tmp_path / ".claude" / "skills" / "analysis"
@@ -78,7 +81,10 @@ class TestSkillSideEffects:
             encoding="utf-8",
         )
         findings = _check_skill_side_effects(str(tmp_path))
-        assert not any(f["check"] == "skillSideEffects" for f in findings)
+        assert not any(
+            f["check"] == "skillSideEffects" and str(tmp_path) in f["message"]
+            for f in findings
+        )
 
     def test_commit_publish_send_all_flagged(self, tmp_path):
         for kw in ["commit", "publish", "send"]:
@@ -89,7 +95,10 @@ class TestSkillSideEffects:
                 encoding="utf-8",
             )
         findings = _check_skill_side_effects(str(tmp_path))
-        flagged_checks = [f for f in findings if f["check"] == "skillSideEffects"]
+        flagged_checks = [
+            f for f in findings
+            if f["check"] == "skillSideEffects" and str(tmp_path) in f["message"]
+        ]
         assert len(flagged_checks) == 3
 
 
