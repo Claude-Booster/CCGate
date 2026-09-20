@@ -165,6 +165,122 @@ def _check_claudemd_excludes(cwd: str | None) -> list[dict]:
     }]
 
 
+_SENSITIVE_DIRS = ["dist", "build", "vendor"]
+
+
+def _load_settings(cwd: str | None) -> dict:
+    """Load merged Claude Code settings.json (global then project-level)."""
+    import json as _json
+    settings: dict = {}
+    candidates = [Path.home() / ".claude" / "settings.json"]
+    if cwd:
+        candidates.append(Path(cwd) / ".claude" / "settings.json")
+    for p in candidates:
+        if p.exists():
+            try:
+                settings.update(_json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                pass
+    return settings
+
+
+def _check_cache_ttl(settings: dict) -> list[dict]:
+    """cacheTtl: API-key or cloud-provider auth with promptCacheTtl unset."""
+    has_api_indicators = "apiKeyHelper" in settings or "cloudProviderId" in settings
+    if not has_api_indicators:
+        return []
+    if settings.get("promptCacheTtl"):
+        return []
+    return [{
+        "check": "cacheTtl",
+        "severity": "warning",
+        "message": (
+            "API-key or cloud-provider auth detected but 'promptCacheTtl' is not set. "
+            "The default TTL is 5 minutes. Set \"promptCacheTtl\": \"1h\" in "
+            "~/.claude/settings.json to use the 1-hour cache window and avoid "
+            "frequent cache misses on idle windows."
+        ),
+    }]
+
+
+def _check_deny_reads(cwd: str | None, settings: dict) -> list[dict]:
+    """denyReads: flag dist/, build/, vendor/, *.generated.* with no permissions.deny rule."""
+    if not cwd:
+        return []
+    project = Path(cwd)
+    deny_rules: list[str] = settings.get("permissions", {}).get("deny", [])
+    findings = []
+
+    for dirname in _SENSITIVE_DIRS:
+        target = project / dirname
+        if not target.exists():
+            continue
+        covered = any(r.startswith(f"Read({dirname}/") for r in deny_rules)
+        if not covered:
+            findings.append({
+                "check": "denyReads",
+                "severity": "warning",
+                "message": (
+                    f"Directory '{dirname}/' exists but has no matching "
+                    f"'Read({dirname}/**/*) deny rule in permissions.deny. "
+                    "Add it to .claude/settings.json to prevent unintentional reads."
+                ),
+            })
+
+    generated = [
+        p for p in project.rglob("*.generated.*")
+        if ".git" not in p.parts and "node_modules" not in p.parts
+    ]
+    if generated:
+        covered = any("generated" in r for r in deny_rules)
+        if not covered:
+            findings.append({
+                "check": "denyReads",
+                "severity": "warning",
+                "message": (
+                    f"Found {len(generated)} *.generated.* file(s) but no matching deny "
+                    "rule. Add 'Read(**/*.generated.*/***)' to permissions.deny."
+                ),
+            })
+    return findings
+
+
+def _check_worktree_sparse(cwd: str | None, settings: dict) -> list[dict]:
+    """worktreeSparse: git worktree in a monorepo without worktree.sparsePaths."""
+    if not cwd:
+        return []
+    project = Path(cwd)
+    git_path = project / ".git"
+    if not git_path.is_file():
+        return []  # .git is a directory in the main checkout; a file only inside worktrees
+    manifests = []
+    for pattern in ("pyproject.toml", "package.json"):
+        for p in project.rglob(pattern):
+            if ".git" not in p.parts and "node_modules" not in p.parts:
+                manifests.append(p)
+    if len(manifests) <= 1:
+        return []
+    if settings.get("worktree", {}).get("sparsePaths"):
+        return []
+    return [{
+        "check": "worktreeSparse",
+        "severity": "warning",
+        "message": (
+            "Git worktree detected in a monorepo but 'worktree.sparsePaths' is not set. "
+            "Configure it in settings.json to limit which packages are visible, "
+            "reducing context overhead per session."
+        ),
+    }]
+
+
+def _check_output_caps(cwd: str | None) -> list[dict]:
+    """outputCaps: check for missing output caps where session history shows large outputs.
+
+    Phase 0 stub — requires state.py session history (Phase 1). Always returns [].
+    """
+    return []
+
+
 def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     """Run all static checks; return a list of finding dicts."""
     if config is None:
@@ -184,6 +300,12 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
 
     findings.extend(_check_skill_side_effects(cwd))
     findings.extend(_check_claudemd_excludes(cwd))
+
+    settings = _load_settings(cwd)
+    findings.extend(_check_cache_ttl(settings))
+    findings.extend(_check_deny_reads(cwd, settings))
+    findings.extend(_check_worktree_sparse(cwd, settings))
+    findings.extend(_check_output_caps(cwd))
 
     return findings
 

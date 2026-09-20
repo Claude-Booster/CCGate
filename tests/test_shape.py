@@ -7,6 +7,10 @@ from ccgate.scripts.shape import (
     _check_skill_side_effects, _check_claudemd_excludes,
     run_shape,
 )
+from ccgate.scripts.shape import (
+    _check_cache_ttl, _check_deny_reads, _check_worktree_sparse,
+    _check_output_caps, _load_settings,
+)
 
 
 class TestClaudemdLines:
@@ -126,3 +130,104 @@ class TestClaudemdExcludes:
         (pkg / "CLAUDE.md").write_text("# scoped\n")
         findings = _check_claudemd_excludes(str(tmp_path))
         assert not any(f["check"] == "claudeMdExcludes" for f in findings)
+
+
+class TestCacheTtl:
+    def test_no_api_key_indicators_no_finding(self, tmp_path):
+        # settings.json with no apiKeyHelper/cloudProviderId
+        settings = {"hitRatioFloor": 0.85}
+        findings = _check_cache_ttl(settings)
+        assert not any(f["check"] == "cacheTtl" for f in findings)
+
+    def test_api_key_helper_without_ttl_flagged(self, tmp_path):
+        settings = {"apiKeyHelper": "op://vault/key", "promptCacheTtl": None}
+        findings = _check_cache_ttl(settings)
+        assert any(f["check"] == "cacheTtl" and f["severity"] == "warning"
+                   for f in findings)
+
+    def test_cloud_provider_without_ttl_flagged(self):
+        settings = {"cloudProviderId": "vertex"}
+        findings = _check_cache_ttl(settings)
+        assert any(f["check"] == "cacheTtl" for f in findings)
+
+    def test_api_key_with_ttl_set_passes(self):
+        settings = {"apiKeyHelper": "op://vault/key", "promptCacheTtl": "1h"}
+        findings = _check_cache_ttl(settings)
+        assert not any(f["check"] == "cacheTtl" for f in findings)
+
+
+class TestDenyReads:
+    def test_no_sensitive_dirs_no_finding(self, tmp_path):
+        settings: dict = {}
+        findings = _check_deny_reads(str(tmp_path), settings)
+        assert not any(f["check"] == "denyReads" for f in findings)
+
+    def test_dist_dir_without_deny_rule_flagged(self, tmp_path):
+        (tmp_path / "dist").mkdir()
+        settings: dict = {}
+        findings = _check_deny_reads(str(tmp_path), settings)
+        assert any(f["check"] == "denyReads" and f["severity"] == "warning"
+                   for f in findings)
+
+    def test_dist_dir_with_deny_rule_passes(self, tmp_path):
+        (tmp_path / "dist").mkdir()
+        settings = {"permissions": {"deny": ["Read(dist/**/*)", "Bash(rm:-rf)"]}}
+        findings = _check_deny_reads(str(tmp_path), settings)
+        assert not any(f["check"] == "denyReads" for f in findings)
+
+    def test_generated_file_without_deny_flagged(self, tmp_path):
+        (tmp_path / "api.generated.ts").write_text("// generated")
+        settings: dict = {}
+        findings = _check_deny_reads(str(tmp_path), settings)
+        assert any(f["check"] == "denyReads" for f in findings)
+
+    def test_generated_file_with_deny_rule_passes(self, tmp_path):
+        (tmp_path / "api.generated.ts").write_text("// generated")
+        settings = {"permissions": {"deny": ["Read(**/*.generated.*/***)"]}}
+        findings = _check_deny_reads(str(tmp_path), settings)
+        assert not any(f["check"] == "denyReads" for f in findings)
+
+
+class TestWorktreeSparse:
+    def test_not_in_worktree_no_finding(self, tmp_path):
+        # .git is a directory — not a worktree
+        (tmp_path / ".git").mkdir()
+        settings: dict = {}
+        findings = _check_worktree_sparse(str(tmp_path), settings)
+        assert not any(f["check"] == "worktreeSparse" for f in findings)
+
+    def test_worktree_single_package_no_finding(self, tmp_path):
+        # .git is a file — inside a worktree; single package
+        (tmp_path / ".git").write_text("gitdir: ../../.git/worktrees/my-wt")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+        settings: dict = {}
+        findings = _check_worktree_sparse(str(tmp_path), settings)
+        assert not any(f["check"] == "worktreeSparse" for f in findings)
+
+    def test_worktree_monorepo_without_sparse_flagged(self, tmp_path):
+        (tmp_path / ".git").write_text("gitdir: ../../.git/worktrees/my-wt")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='root'\n")
+        pkg = tmp_path / "packages" / "core"
+        pkg.mkdir(parents=True)
+        (pkg / "pyproject.toml").write_text("[project]\nname='core'\n")
+        settings: dict = {}
+        findings = _check_worktree_sparse(str(tmp_path), settings)
+        assert any(f["check"] == "worktreeSparse" and f["severity"] == "warning"
+                   for f in findings)
+
+    def test_worktree_monorepo_with_sparse_passes(self, tmp_path):
+        (tmp_path / ".git").write_text("gitdir: ../../.git/worktrees/my-wt")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='root'\n")
+        pkg = tmp_path / "packages" / "core"
+        pkg.mkdir(parents=True)
+        (pkg / "pyproject.toml").write_text("[project]\nname='core'\n")
+        settings = {"worktree": {"sparsePaths": ["packages/core"]}}
+        findings = _check_worktree_sparse(str(tmp_path), settings)
+        assert not any(f["check"] == "worktreeSparse" for f in findings)
+
+
+class TestOutputCaps:
+    def test_always_returns_empty_in_phase0(self, tmp_path):
+        # Phase 0 stub — no session history available
+        from ccgate.scripts.shape import _check_output_caps
+        assert _check_output_caps(str(tmp_path)) == []
