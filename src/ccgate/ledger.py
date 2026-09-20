@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
+
+from ccgate.state import ccgate_home
 
 
 def _load_price(model: str | None) -> float:
     """Return input price per token from ~/.ccgate/pricing.json. 0.0 if absent."""
     if not model:
         return 0.0
-    env = os.environ.get("CCGATE_HOME")
-    home = Path(env) if env else Path.home() / ".ccgate"
+    home = ccgate_home()
     pricing_path = home / "pricing.json"
     if not pricing_path.exists():
         return 0.0
