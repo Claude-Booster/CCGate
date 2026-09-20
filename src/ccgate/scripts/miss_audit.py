@@ -19,9 +19,6 @@ from ccgate.transcript import (
     read_transcript,
 )
 
-# Re-export so test imports from miss_audit work.
-classify_requests = classify_requests  # noqa: F811
-
 
 def attribute_miss(curr: Request, prev: Request | None, ttl: int) -> str:
     """Return the most likely D1 code for a miss, using transcript-only signals."""
@@ -43,12 +40,18 @@ def attribute_miss(curr: Request, prev: Request | None, ttl: int) -> str:
 
 
 def _turns_remaining_est(requests: list[Request], index: int) -> tuple[float, str]:
-    """Estimate remaining turns at request[index] using rolling median (§6 algorithm)."""
+    """Estimate remaining turns via rolling token-per-turn rate vs window size (§6 algorithm)."""
+    from ccgate.model import DEFAULT_WINDOW_TOKENS
     if index < 3:
         return 5.0, f"bootstrap constant (turn {index + 1} of session)"
-    gaps = [j - i for i, j in zip(range(index), range(1, index + 1))]
-    median = sorted(gaps)[len(gaps) // 2]
-    return float(median), f"rolling median of {len(gaps)} observed turn gaps"
+    # Use rolling average tokens-per-turn to estimate remaining capacity.
+    total_tokens = sum(r.usage.input_tokens for r in requests[:index + 1])
+    avg_tokens_per_turn = total_tokens / (index + 1)
+    if avg_tokens_per_turn <= 0:
+        return 5.0, "bootstrap constant (zero token average)"
+    tokens_remaining = max(0, DEFAULT_WINDOW_TOKENS - total_tokens)
+    est = tokens_remaining / avg_tokens_per_turn
+    return round(est, 1), f"window remaining / rolling avg {avg_tokens_per_turn:.0f} tok/turn"
 
 
 def run_audit(paths: list[Path], config: dict) -> dict:
@@ -73,7 +76,7 @@ def run_audit(paths: list[Path], config: dict) -> dict:
             continue
 
         ttl = infer_ttl_from_usage(requests)
-        classified = classify_requests(requests)
+        classified = classify_requests(requests, transcript_path=path)
 
         prev_req: Request | None = None
         expected_cache = 0

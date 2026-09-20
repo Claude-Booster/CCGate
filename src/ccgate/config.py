@@ -48,13 +48,24 @@ def load_config(cwd: str | None = None) -> dict:
         _merge_file(cfg, Path(cwd) / ".ccgate" / "config.json")
     # Environment overrides: CCGATE_HIT_RATIO_FLOOR → hitRatioFloor
     for key in list(DEFAULTS.keys()):
+        if key == "bashRewriteRules":
+            continue  # list type not parseable from a single env var
         env_key = "CCGATE_" + _to_upper_snake(key)
-        val = os.environ.get(env_key)
-        if val is not None:
-            try:
-                cfg[key] = type(DEFAULTS[key])(val)
-            except (ValueError, TypeError):
-                pass
+        raw = os.environ.get(env_key)
+        if raw is None:
+            continue
+        try:
+            val = type(DEFAULTS[key])(raw)
+        except (ValueError, TypeError):
+            print(f"ccgate: env {env_key}={raw!r} could not be converted — using default",
+                  file=sys.stderr)
+            continue
+        lo, hi = _RANGE.get(key, (None, None))
+        if lo is not None and not (lo <= val <= hi):
+            print(f"ccgate: env {env_key}={raw!r} out of range [{lo}, {hi}] — using default",
+                  file=sys.stderr)
+            continue
+        cfg[key] = val
     return cfg
 
 def _merge_file(cfg: dict, path: Path) -> None:

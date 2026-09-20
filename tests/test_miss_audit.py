@@ -2,8 +2,8 @@ from pathlib import Path
 
 from ccgate import taxonomy
 from ccgate.config import DEFAULTS
-from ccgate.scripts.miss_audit import attribute_miss, classify_requests, run_audit
-from ccgate.transcript import Request, Usage
+from ccgate.scripts.miss_audit import attribute_miss, run_audit
+from ccgate.transcript import Request, Usage, classify_requests
 
 FIXTURES = Path(__file__).parent / "fixtures" / "transcripts"
 
@@ -90,8 +90,14 @@ class TestRunAudit:
 
     def test_d2_compaction_not_in_avoidable_total(self):
         report = run_audit([FIXTURES / "d2_compaction.jsonl"], DEFAULTS)
+        # D2.compaction must appear in the misses list (we detected it)
+        d2_entries = [m for m in report["misses"] if m["cause"] == taxonomy.D2_COMPACTION]
+        assert d2_entries, "D2.compaction should appear in misses list"
+        # Its cost must NOT be included in avoidable_usd
         d1_cost = sum(
             m["cost_usd"] or 0 for m in report["misses"]
             if m["cause"] in taxonomy.D1_ALL
         )
         assert abs(report["summary"]["avoidable_usd"] - d1_cost) < 1e-9
+        # Sanity: D2 cost itself should be zero (expected rebuild, not charged as avoidable)
+        assert report["summary"]["avoidable_usd"] == d1_cost

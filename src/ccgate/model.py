@@ -32,9 +32,9 @@ def get_model_spec(model_id: str) -> ModelSpec:
     if model_id in PRICING:
         return PRICING[model_id]
     # Prefix match for versioned variants (e.g. "claude-sonnet-5-20260101")
-    for key, spec in PRICING.items():
+    for key in sorted(PRICING, key=len, reverse=True):
         if model_id.startswith(key):
-            return spec
+            return PRICING[key]
     return _FALLBACK
 
 
