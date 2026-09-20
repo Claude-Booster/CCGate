@@ -89,6 +89,82 @@ def _measure_skill_descriptions(cwd: str | None) -> int:
     return total
 
 
+_SIDE_EFFECT_KEYWORDS = {"deploy", "commit", "publish", "send"}
+
+
+def _check_skill_side_effects(cwd: str | None) -> list[dict]:
+    """skillSideEffects: skills named deploy/commit/publish/send without disable-model-invocation."""
+    search_roots = [Path.home() / ".claude"]
+    if cwd:
+        search_roots.append(Path(cwd) / ".claude")
+    findings = []
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for skill_file in root.rglob("SKILL.md"):
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if not content.startswith("---"):
+                continue
+            end = content.find("---", 3)
+            if end == -1:
+                continue
+            frontmatter = content[3:end]
+            name = ""
+            disable_model = False
+            for line in frontmatter.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("name:"):
+                    name = stripped.split(":", 1)[1].strip().strip("\"'")
+                if stripped.startswith("disable-model-invocation:"):
+                    val = stripped.split(":", 1)[1].strip().lower()
+                    disable_model = val == "true"
+            if any(kw in name.lower() for kw in _SIDE_EFFECT_KEYWORDS) and not disable_model:
+                findings.append({
+                    "check": "skillSideEffects",
+                    "severity": "error",
+                    "message": (
+                        f"{skill_file}: skill '{name}' matches a side-effect keyword "
+                        "(deploy/commit/publish/send) but is missing "
+                        "'disable-model-invocation: true'. Add it to the skill's frontmatter."
+                    ),
+                })
+    return findings
+
+
+def _check_claudemd_excludes(cwd: str | None) -> list[dict]:
+    """claudeMdExcludes: monorepo with >1 package but no package-level CLAUDE.md files."""
+    if not cwd:
+        return []
+    project = Path(cwd)
+    manifests = []
+    for pattern in ("pyproject.toml", "package.json"):
+        for p in project.rglob(pattern):
+            if ".git" not in p.parts and "node_modules" not in p.parts:
+                manifests.append(p)
+    if len(manifests) <= 1:
+        return []
+    # Check if any sub-package has a scoped CLAUDE.md
+    sub_manifests = [p for p in manifests if p.parent != project]
+    has_scoped = any(
+        (p.parent / "CLAUDE.md").exists() or (p.parent / ".claude" / "CLAUDE.md").exists()
+        for p in sub_manifests
+    )
+    if has_scoped:
+        return []
+    return [{
+        "check": "claudeMdExcludes",
+        "severity": "warning",
+        "message": (
+            f"Monorepo with {len(manifests)} package manifest(s) detected but no "
+            "package-level CLAUDE.md files found. Add a CLAUDE.md in each package "
+            "directory so Claude Code loads only relevant context per package."
+        ),
+    }]
+
+
 def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     """Run all static checks; return a list of finding dicts."""
     if config is None:
@@ -105,6 +181,9 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     total_chars = _measure_skill_descriptions(cwd)
     budget_fraction = config.get("skillListingBudgetFraction", 0.01)
     findings.extend(_check_skill_listing(total_chars, window_tokens, budget_fraction))
+
+    findings.extend(_check_skill_side_effects(cwd))
+    findings.extend(_check_claudemd_excludes(cwd))
 
     return findings
 
