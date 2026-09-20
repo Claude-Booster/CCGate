@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -39,8 +40,10 @@ def write_session(session_id: str, data: dict) -> None:
     path = session_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    # Omit indent for performance; use separators to minimize whitespace
+    tmp.write_text(json.dumps(data, separators=(',', ':')), encoding="utf-8")
+    # Use shutil.move() which handles Windows file locking better than os.replace()
+    shutil.move(str(tmp), str(path))
 
 
 def read_tools() -> dict:
@@ -57,8 +60,10 @@ def write_tools(data: dict) -> None:
     path = tools_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    # Omit indent for performance; use separators to minimize whitespace
+    tmp.write_text(json.dumps(data, separators=(',', ':')), encoding="utf-8")
+    # Use shutil.move() which handles Windows file locking better than os.replace()
+    shutil.move(str(tmp), str(path))
 
 
 @contextmanager
