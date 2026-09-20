@@ -1,0 +1,6 @@
+{
+  "name": "ccgate",
+  "version": "0.1.0",
+  "description": "Deterministic context and prompt-cache gate for Claude Code",
+  "hooks": []
+}
