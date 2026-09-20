@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ccgate import taxonomy
 from ccgate.config import DEFAULTS
-from ccgate.scripts.miss_audit import attribute_miss, run_audit
+from ccgate.scripts.miss_audit import attribute_miss, run_audit, _turns_remaining_est
 from ccgate.transcript import Request, Usage, classify_requests
 
 FIXTURES = Path(__file__).parent / "fixtures" / "transcripts"
@@ -101,3 +101,42 @@ class TestRunAudit:
         assert abs(report["summary"]["avoidable_usd"] - d1_cost) < 1e-9
         # Sanity: D2 cost itself should be zero (expected rebuild, not charged as avoidable)
         assert report["summary"]["avoidable_usd"] == d1_cost
+
+
+class TestTurnsRemainingEst:
+    def _make_requests(self, token_counts):
+        return [
+            _req(i, "claude-sonnet-5", toks, 0, toks, h1=toks)
+            for i, toks in enumerate(token_counts)
+        ]
+
+    def test_first_three_turns_bootstrap(self):
+        reqs = self._make_requests([1000, 2000, 3000])
+        for i in range(3):
+            est, derivation = _turns_remaining_est(reqs, i)
+            assert est == 5.0
+            assert "bootstrap" in derivation.lower()
+
+    def test_after_three_turns_uses_median_not_mean(self):
+        # Tokens: [1000, 1000, 1000, 9000] — mean = 3000, median = 1000
+        # With median=1000 and DEFAULT_WINDOW_TOKENS=200_000:
+        # used = 12000, remaining = 188000, est = 188000/1000 = 188.0
+        from ccgate.model import DEFAULT_WINDOW_TOKENS
+        reqs = self._make_requests([1000, 1000, 1000, 9000])
+        est, derivation = _turns_remaining_est(reqs, 3)
+        total = sum(r.usage.input_tokens for r in reqs)
+        median_tpt = 1000.0  # median([1000,1000,1000,9000])
+        expected = round((DEFAULT_WINDOW_TOKENS - total) / median_tpt, 1)
+        assert est == expected
+        assert "median" in derivation.lower()
+
+    def test_derivation_mentions_turn_count(self):
+        reqs = self._make_requests([5000] * 5)
+        _, derivation = _turns_remaining_est(reqs, 4)
+        assert "5" in derivation  # 5 turns observed
+
+    def test_zero_median_falls_back_to_bootstrap(self):
+        reqs = self._make_requests([0, 0, 0, 0])
+        est, derivation = _turns_remaining_est(reqs, 3)
+        assert est == 5.0
+        assert "bootstrap" in derivation.lower()
