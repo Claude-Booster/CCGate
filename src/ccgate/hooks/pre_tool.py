@@ -184,20 +184,37 @@ def _check_read_cache(
         }
 
 
-# ── rule 3: bash rewriting (implemented in Task 4) ────────────────────────────
+# ── rule 3: bash rewriting (F2) ──────────────────────────────────────────────
 
-_BUILTIN_RULES: list[tuple[str, str]] = [
-    ("pytest",      "2>&1 | tail -100"),
-    ("cargo test",  "2>&1 | tail -100"),
-    ("jest",        "2>&1 | tail -100"),
-    ("go test",     "2>&1 | tail -100"),
-    ("npm test",    "2>&1 | tail -100"),
-    ("mvn test",    "2>&1 | tail -100"),
-    ("grep",        "| head -100"),
-    ("find",        "| head -100"),
+# (prefix, class_a_flag, class_b_filter, use_pipefail)
+# class_a_flag=None → Class B only; use_pipefail=True → prepend "set -o pipefail; "
+_BUILTIN_RULES: list[tuple[str, Optional[str], str, bool]] = [
+    ("pytest",      "-q",        "2>&1 | tail -n 40", True),
+    ("cargo test",  "--quiet",   "2>&1 | tail -n 40", True),
+    ("jest",        "--silent",  "2>&1 | tail -n 40", True),
+    ("go test",     None,        "2>&1 | tail -n 40", True),
+    ("npm test",    "--silent",  "2>&1 | tail -n 40", True),
+    ("mvn test",    "-q",        "2>&1 | tail -n 40", True),
+    ("grep",        None,        "| head -100",        False),
+    ("find",        None,        "| head -100",        False),
 ]
 
 _METACHARACTERS = frozenset(".*+?[(")
+
+# G12: shell operators that make rewriting unsafe
+_COMPOUND_CHARS = frozenset(";|><&`")
+
+
+def _has_compound(command: str) -> bool:
+    """Return True if command contains any shell compound or redirect operator."""
+    if "\n" in command:
+        return True
+    for ch in _COMPOUND_CHARS:
+        if ch in command:
+            return True
+    if "$(" in command:
+        return True
+    return False
 
 
 def _apply_bash_rewrite(
@@ -209,7 +226,11 @@ def _apply_bash_rewrite(
         return None
     command: str = tool_input.get("command", "")
 
-    user_rules: list[tuple[str, str]] = []
+    # G12: never rewrite compound or redirected commands
+    if _has_compound(command):
+        return None
+
+    user_rules: list[tuple[str, Optional[str], str, bool]] = []
     for rule in config.get("bashRewriteRules", []):
         prefix = rule.get("prefix", "")
         if any(c in prefix for c in _METACHARACTERS):
@@ -219,17 +240,27 @@ def _apply_bash_rewrite(
                 file=sys.stderr,
             )
             continue
-        user_rules.append((prefix, rule.get("filter", "")))
+        user_rules.append((prefix, None, rule.get("filter", ""), False))
 
-    for prefix, filter_suffix in _BUILTIN_RULES + user_rules:
-        if command.lstrip().startswith(prefix):
-            return {"updatedInput": {**tool_input, "command": f"{command} {filter_suffix}"}}
+    for prefix, class_a, class_b, use_pipefail in _BUILTIN_RULES + user_rules:
+        if not command.lstrip().startswith(prefix):
+            continue
+        # Class A: add native quiet flag when not already present (preferred)
+        if class_a and class_a not in command:
+            return {"updatedInput": {**tool_input, "command": f"{command} {class_a}"}}
+        # Class B: pipe filter — prepend pipefail for test runners (G13)
+        if use_pipefail:
+            return {"updatedInput": {**tool_input, "command": f"set -o pipefail; {command} {class_b}"}}
+        return {"updatedInput": {**tool_input, "command": f"{command} {class_b}"}}
     return None
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if os.environ.get("CCGATE_DISABLE") == "1":
+        sys.exit(0)
+
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
