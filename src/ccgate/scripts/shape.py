@@ -468,7 +468,8 @@ def stage_fixes(
         seen_skill_paths: set[str] = set()
         for finding in _check_skill_side_effects(cwd):
             # message format: "<path>: skill '<name>' ..."
-            skill_path_str = finding["message"].split(":")[0].strip()
+            # Split on ": skill " to avoid splitting on Windows drive-letter colon
+            skill_path_str = finding["message"].split(": skill ", 1)[0].strip()
             # Deduplicate: global and cwd roots may resolve to the same file
             resolved = str(Path(skill_path_str).resolve())
             if resolved in seen_skill_paths:
