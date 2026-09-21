@@ -526,6 +526,55 @@ def stage_fixes(
     }
 
 
+def apply_fixes(report: dict) -> dict:
+    """Apply all staged fixes and return an updated report with applied=True.
+
+    Measures startup overhead before and after applying. I3: delta is max(0, ...).
+    """
+    cwd = report.get("cwd")
+
+    # Measure startup BEFORE applying fixes
+    claudemd_before = _find_claudemd_files(cwd)
+    chars_before = (
+        sum(len(p.read_text(encoding="utf-8")) for p in claudemd_before if p.exists())
+        + _measure_skill_descriptions(cwd)
+    )
+
+    for fix in report["fixes"]:
+        file_path = _resolve_fix_path(fix["file"], cwd)
+        action = fix["action"]
+        if action == "json_set":
+            _safe_json_patch(file_path, "set", fix["key"], fix["value"])
+        elif action == "json_append":
+            _safe_json_patch(file_path, "append", fix["key"], fix["value"])
+        elif action == "create":
+            _safe_create(file_path, fix["content"])
+        elif action == "frontmatter_set":
+            _safe_frontmatter_set(file_path, fix["key"], fix["value"])
+
+    # Measure startup AFTER applying fixes
+    claudemd_after = _find_claudemd_files(cwd)
+    chars_after = (
+        sum(len(p.read_text(encoding="utf-8")) for p in claudemd_after if p.exists())
+        + _measure_skill_descriptions(cwd)
+    )
+
+    tokens_before = chars_before // 4
+    tokens_after = chars_after // 4
+    delta = max(0, tokens_before - tokens_after)
+
+    return {
+        **report,
+        "applied": True,
+        "applied_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "startup_chars_before": chars_before,
+        "startup_chars_after": chars_after,
+        "startup_tokens_before_approx": tokens_before,
+        "startup_tokens_after_approx": tokens_after,
+        "startup_delta_approx": delta,
+    }
+
+
 def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     """Run all static checks; return a list of finding dicts."""
     if config is None:
