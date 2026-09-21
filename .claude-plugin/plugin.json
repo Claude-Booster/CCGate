@@ -4,6 +4,11 @@
   "description": "Deterministic context and prompt-cache gate for Claude Code",
   "hooks": [
     {
+      "event": "PreToolUse",
+      "matcher": "Read|Edit|Write|Bash",
+      "command": "python -m ccgate.hooks.pre_tool"
+    },
+    {
       "event": "PostToolUse",
       "matcher": "Read|Edit|Write|Glob|Grep|Bash|Agent|mcp__.*",
       "command": "python -m ccgate.hooks.post_tool"

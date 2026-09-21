@@ -285,3 +285,109 @@ def test_read_cache_missing_file_allowed(tmp_path):
     # returns OSError → each call treats as changed → always allow.
     assert r.returncode == 0
     assert r.stdout.strip() == ""
+
+
+# ── bash rewriting ────────────────────────────────────────────────────────────
+
+
+def test_bash_rewrite_pytest_gets_tail(tmp_path):
+    """'pytest' command gets '2>&1 | tail -100' appended."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b1", "tool_name": "Bash",
+                "tool_input": {"command": "pytest tests/ -v"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert "updatedInput" in out
+    assert out["updatedInput"]["command"] == "pytest tests/ -v 2>&1 | tail -100"
+
+
+def test_bash_rewrite_grep_gets_head(tmp_path):
+    """'grep' command gets '| head -100' appended."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b2", "tool_name": "Bash",
+                "tool_input": {"command": "grep -r foo ."}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["updatedInput"]["command"] == "grep -r foo . | head -100"
+
+
+def test_bash_rewrite_no_match_passes_through(tmp_path):
+    """Non-matching command passes through unchanged."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b3", "tool_name": "Bash",
+                "tool_input": {"command": "ls -la"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_disabled_passes_through(tmp_path):
+    """Rule inactive by default — pytest command not rewritten."""
+    env = _base_env(tmp_path)  # no CCGATE_BASH_REWRITE_ENABLED
+    payload = {"session_id": "b4", "tool_name": "Bash",
+                "tool_input": {"command": "pytest"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_user_rule_applied(tmp_path):
+    """User rule in bashRewriteRules config is applied after built-ins."""
+    config_dir = tmp_path / ".ccgate"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"bashRewriteRules": [{"prefix": "mytest", "filter": "| tail -50"}]}),
+        encoding="utf-8",
+    )
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b5", "tool_name": "Bash",
+                "tool_input": {"command": "mytest run"}}
+    # subprocess cwd=tmp_path so project .ccgate/config.json is found
+    r = _run(payload, env, cwd=tmp_path)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["updatedInput"]["command"] == "mytest run | tail -50"
+
+
+def test_bash_rewrite_metacharacter_prefix_rejected(tmp_path):
+    """Prefix with '.' metacharacter is skipped; other rules still apply."""
+    config_dir = tmp_path / ".ccgate"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"bashRewriteRules": [
+            {"prefix": "bad.prefix", "filter": "| head -10"},  # rejected
+            {"prefix": "goodcmd", "filter": "| tail -20"},     # applied
+        ]}),
+        encoding="utf-8",
+    )
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b6", "tool_name": "Bash",
+                "tool_input": {"command": "goodcmd run"}}
+    r = _run(payload, env, cwd=tmp_path)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["updatedInput"]["command"] == "goodcmd run | tail -20"
+
+
+def test_bash_rewrite_not_applied_to_read(tmp_path):
+    """Bash rewrite rule only applies to Bash tool."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b7", "tool_name": "Read",
+                "tool_input": {"file_path": "/tmp/file.py", "command": "pytest"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_leading_whitespace_stripped_for_match(tmp_path):
+    """Leading whitespace before command is stripped before prefix matching."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b8", "tool_name": "Bash",
+                "tool_input": {"command": "  pytest tests/"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    # Original command preserved; filter appended to original (with leading spaces)
+    assert out["updatedInput"]["command"] == "  pytest tests/ 2>&1 | tail -100"
