@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# .githooks/tag
+# Blocks annotated tag creation when the tag name or tagger identity contains
+# a restricted identifier.  Requires git >= 2.24.0.
+# $1 = tag name, $2 = tag type, $3 = object SHA.
+
+set -euo pipefail
+
+# ── Patterns (variable names are intentionally opaque) ─────────────────────────
+P1="Fred Mandap|Frederick Mandap|frederick\.mandap|thug_kcirederf"
+P2="accenture\.com|Accenture"
+_C="$P1|$P2"
+
+TAG_NAME="${1:-}"
+
+# Check the tag name itself.
+if [[ -n "$TAG_NAME" ]] && printf '%s' "$TAG_NAME" | grep -qiE "$_C"; then
+  printf '[tag] BLOCKED: tag name %q contains a restricted identifier.\n' "$TAG_NAME" >&2
+  exit 1
+fi
+
+# Check tagger identity using the same resolution order as git.
+_CFG_NAME="$(git config user.name  2>/dev/null || true)"
+_CFG_EMAIL="$(git config user.email 2>/dev/null || true)"
+_TAGGER_NAME="${GIT_COMMITTER_NAME:-${GIT_AUTHOR_NAME:-$_CFG_NAME}}"
+_TAGGER_EMAIL="${GIT_COMMITTER_EMAIL:-${GIT_AUTHOR_EMAIL:-$_CFG_EMAIL}}"
+
+for _val in "$_TAGGER_NAME" "$_TAGGER_EMAIL"; do
+  [[ -z "$_val" ]] && continue
+  if printf '%s' "$_val" | grep -qiE "$_C"; then
+    printf '[tag] BLOCKED: tagger identity contains a restricted identifier.\n' >&2
+    printf '  Fix: git config user.name  "Developer"\n' >&2
+    printf '       git config user.email "fredman08@users.noreply.github.com"\n' >&2
+    exit 1
+  fi
+done

@@ -1,0 +1,2 @@
+# Keep shell scripts as LF on all platforms — CRLF breaks bash shebangs.
+.githooks/*  text eol=lf
