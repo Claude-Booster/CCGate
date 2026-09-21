@@ -185,12 +185,47 @@ def _check_read_cache(
         }
 
 
-# ── rule 3: bash rewriting (stub — implemented in Task 4) ─────────────────────
+# ── rule 3: bash rewriting (implemented in Task 4) ────────────────────────────
+
+_BUILTIN_RULES: list[tuple[str, str]] = [
+    ("pytest",      "2>&1 | tail -100"),
+    ("cargo test",  "2>&1 | tail -100"),
+    ("jest",        "2>&1 | tail -100"),
+    ("go test",     "2>&1 | tail -100"),
+    ("npm test",    "2>&1 | tail -100"),
+    ("mvn test",    "2>&1 | tail -100"),
+    ("grep",        "| head -100"),
+    ("find",        "| head -100"),
+]
+
+_METACHARACTERS = frozenset(".*+?[(")
+
 
 def _apply_bash_rewrite(
     tool_name: str, tool_input: dict, config: dict
 ) -> Optional[dict]:
-    return None  # implemented in Task 4
+    if not config.get("bashRewriteEnabled", False):
+        return None
+    if tool_name != "Bash":
+        return None
+    command: str = tool_input.get("command", "")
+
+    user_rules: list[tuple[str, str]] = []
+    for rule in config.get("bashRewriteRules", []):
+        prefix = rule.get("prefix", "")
+        if any(c in prefix for c in _METACHARACTERS):
+            print(
+                f"ccgate: bashRewriteRules entry rejected — prefix {prefix!r}"
+                " contains regex metacharacters",
+                file=sys.stderr,
+            )
+            continue
+        user_rules.append((prefix, rule.get("filter", "")))
+
+    for prefix, filter_suffix in _BUILTIN_RULES + user_rules:
+        if command.lstrip().startswith(prefix):
+            return {"updatedInput": {**tool_input, "command": f"{command} {filter_suffix}"}}
+    return None
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -208,7 +243,7 @@ def main() -> None:
 
     result: Optional[dict] = None
     try:
-        config = load_config()
+        config = load_config(cwd=str(Path.cwd()))
         result = _check_contextignore(tool_name, tool_input, config)
         if result is None:
             result = _check_read_cache(session_id, tool_name, tool_input, config)
