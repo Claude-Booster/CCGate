@@ -14,6 +14,8 @@
     "staleFiles":                 {"type": "integer", "minimum": 0,                  "default": 8},
     "staleTokenRatio":            {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.10},
     "readCacheEnabled":           {"type": "boolean",                                "default": false},
+    "contextignoreEnabled":       {"type": "boolean",                                "default": false},
+    "bashRewriteEnabled":         {"type": "boolean",                                "default": false},
     "skillListingBudgetFraction": {"type": "number",  "minimum": 0, "maximum": 1,    "default": 0.01},
     "bashRewriteRules": {
       "type": "array",
@@ -27,6 +29,9 @@
           "filter": {"type": "string", "minLength": 1}
         }
       }
-    }
+    },
+    "startupTokenCap":      {"type": "integer", "minimum": 1, "maximum": 200000, "default": 12000},
+    "otelPort":             {"type": "integer", "minimum": 1024, "maximum": 65535, "default": 4318},
+    "digestMaxPaths":       {"type": "integer", "minimum": 1, "maximum": 10000, "default": 500}
   }
 }

@@ -21,6 +21,9 @@ DEFAULTS: dict = {
     "bashRewriteEnabled": False,
     "skillListingBudgetFraction": 0.01,
     "bashRewriteRules": [],
+    "startupTokenCap": 12000,
+    "otelPort": 4318,
+    "digestMaxPaths": 500,
 }
 
 _RANGE: dict[str, tuple] = {
@@ -35,6 +38,9 @@ _RANGE: dict[str, tuple] = {
     "staleFiles":                 (0, 10_000),
     "staleTokenRatio":            (0.0, 1.0),
     "skillListingBudgetFraction": (0.0, 1.0),
+    "startupTokenCap": (1, 200_000),
+    "otelPort":        (1024, 65535),
+    "digestMaxPaths":  (1, 10_000),
 }
 
 def load_config(cwd: str | None = None) -> dict:
