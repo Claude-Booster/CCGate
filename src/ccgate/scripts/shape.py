@@ -2,8 +2,11 @@
 import json
 import os
 import datetime
+import subprocess
 import sys
 from pathlib import Path
+
+from ccgate.state import ccgate_home
 
 _CHARS_PER_TOKEN = 4
 _CLAUDEMD_MAX_LINES = 200
@@ -184,6 +187,140 @@ def _load_settings(cwd: str | None) -> dict:
             except (OSError, ValueError):
                 pass
     return settings
+
+
+_CC_VERSION_FLOOR_TTL_1H    = (2, 1, 108)   # ENABLE_PROMPT_CACHING_1H
+_CC_VERSION_FLOOR_SUBAGENT  = (2, 1, 257)   # CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL
+
+
+def _get_cc_version() -> tuple[int, int, int] | None:
+    """Return Claude Code version as a 3-tuple, or None if undetectable."""
+    import re as _re
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        m = _re.search(r"(\d+)\.(\d+)\.(\d+)", result.stdout or result.stderr or "")
+        if m:
+            return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except Exception:
+        pass
+    return None
+
+
+def _is_subscription_auth(settings: dict) -> bool:
+    """Return True when the session uses subscription auth (1h TTL already managed).
+
+    Subscription auth has no apiKeyHelper or cloudProviderId; and the most
+    recent statusline snapshot reports prompt_cache.ttl == "1h".
+    """
+    if "apiKeyHelper" in settings or "cloudProviderId" in settings:
+        return False
+    sessions_dir = ccgate_home() / "sessions"
+    if not sessions_dir.exists():
+        return False
+    snapshots = sorted(
+        sessions_dir.glob("*-statusline.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for snap in snapshots[:3]:
+        try:
+            data = json.loads(snap.read_text(encoding="utf-8"))
+            if data.get("prompt_cache", {}).get("ttl") == "1h":
+                return True
+        except (json.JSONDecodeError, OSError):
+            pass
+    return False
+
+
+def _check_session_pinning(settings: dict) -> list[dict]:
+    """A1/G18: flag missing or version-gated cache-pinning env keys."""
+    if _is_subscription_auth(settings):
+        return []
+
+    env_block = settings.get("env", {})
+    cc_version = _get_cc_version()
+    findings: list[dict] = []
+
+    # ENABLE_PROMPT_CACHING_1H
+    if not env_block.get("ENABLE_PROMPT_CACHING_1H"):
+        if cc_version is not None and cc_version < _CC_VERSION_FLOOR_TTL_1H:
+            findings.append({
+                "check": "version_gap",
+                "severity": "warning",
+                "message": (
+                    f"ENABLE_PROMPT_CACHING_1H requires Claude Code ≥ 2.1.108 "
+                    f"(detected {'.'.join(str(v) for v in cc_version)}). "
+                    "Upgrade Claude Code to enable the 1-hour cache TTL."
+                ),
+            })
+        else:
+            findings.append({
+                "check": "sessionPinning",
+                "severity": "warning",
+                "message": (
+                    "ENABLE_PROMPT_CACHING_1H not set in settings.json env block. "
+                    "Sessions idle > 5 min will miss the cache. "
+                    "Run 'ccgate shape --fix' to apply."
+                ),
+            })
+
+    # CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL
+    if not env_block.get("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"):
+        if cc_version is not None and cc_version < _CC_VERSION_FLOOR_SUBAGENT:
+            findings.append({
+                "check": "version_gap",
+                "severity": "warning",
+                "message": (
+                    f"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL requires Claude Code ≥ 2.1.257 "
+                    f"(detected {'.'.join(str(v) for v in cc_version)}). "
+                    "Upgrade Claude Code to extend subagent cache TTL."
+                ),
+            })
+        else:
+            findings.append({
+                "check": "sessionPinning",
+                "severity": "warning",
+                "message": (
+                    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL not set. "
+                    "Subagent sessions use the 5-minute default. "
+                    "Run 'ccgate shape --fix' to apply."
+                ),
+            })
+
+    return findings
+
+
+def _stage_session_pinning(settings: dict, fixes: list) -> None:
+    """Append A1 fix entries to fixes list. Omits keys below their version floor."""
+    if _is_subscription_auth(settings):
+        return
+    env_block = settings.get("env", {})
+    cc_version = _get_cc_version()
+
+    if not env_block.get("ENABLE_PROMPT_CACHING_1H"):
+        if cc_version is None or cc_version >= _CC_VERSION_FLOOR_TTL_1H:
+            fixes.append({
+                "check": "sessionPinning",
+                "file": "~/.claude/settings.json",
+                "action": "json_set",
+                "key": "env.ENABLE_PROMPT_CACHING_1H",
+                "value": "1",
+                "description": "Pin 1-hour prompt cache TTL (A1)",
+            })
+
+    if not env_block.get("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"):
+        if cc_version is None or cc_version >= _CC_VERSION_FLOOR_SUBAGENT:
+            fixes.append({
+                "check": "sessionPinning",
+                "file": "~/.claude/settings.json",
+                "action": "json_set",
+                "key": "env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+                "value": "1h",
+                "description": "Pin subagent prompt cache TTL to 1 hour (A1)",
+            })
 
 
 def _check_cache_ttl(settings: dict) -> list[dict]:
@@ -379,6 +516,10 @@ def stage_fixes(
             "value": "1h",
             "description": "Set prompt cache TTL to 1 hour",
         })
+
+    # sessionPinning (A1) — fix targets global settings
+    if config.get("pinCacheTtl", True):
+        _stage_session_pinning(settings, fixes)
 
     # denyReads — detect which dirs/patterns need coverage
     if cwd:
@@ -601,6 +742,7 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     findings.extend(_check_deny_reads(cwd, settings))
     findings.extend(_check_worktree_sparse(cwd, settings))
     findings.extend(_check_output_caps(cwd))
+    findings.extend(_check_session_pinning(settings))
 
     return findings
 
