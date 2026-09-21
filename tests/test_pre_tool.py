@@ -152,3 +152,136 @@ def test_hook_exit_0_on_empty_stdin(tmp_path):
         env=env,
     )
     assert r.returncode == 0
+
+
+# ── read cache ────────────────────────────────────────────────────────────────
+
+
+def test_read_cache_first_read_allowed(tmp_path):
+    """First Read of a file is always allowed."""
+    target = tmp_path / "file.py"
+    target.write_text("hello", encoding="utf-8")
+    env = _base_env(tmp_path, {"CCGATE_READ_CACHE_ENABLED": "1"})
+    payload = {"session_id": "rc1", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_identical_repeat_denied(tmp_path):
+    """Second Read with same (path, offset, limit) + unchanged mtime → denied."""
+    target = tmp_path / "file.py"
+    target.write_text("hello", encoding="utf-8")
+    env = _base_env(tmp_path, {"CCGATE_READ_CACHE_ENABLED": "1"})
+    payload = {"session_id": "rc2", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    _run(payload, env)  # first read — populates cache
+    r = _run(payload, env)  # second read — should deny
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out.get("permissionDecision") == "deny"
+    assert "read cache" in out["permissionDecisionReason"]
+    assert "readCacheEnabled" in out["permissionDecisionReason"]
+
+
+def test_read_cache_changed_mtime_allowed(tmp_path):
+    """Re-read after file modification is allowed."""
+    target = tmp_path / "file.py"
+    target.write_text("hello", encoding="utf-8")
+    env = _base_env(tmp_path, {"CCGATE_READ_CACHE_ENABLED": "1"})
+    payload = {"session_id": "rc3", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    _run(payload, env)  # first read
+    # Modify file (and ensure mtime changes — write new content)
+    target.write_text("changed", encoding="utf-8")
+    # Force mtime change on Windows (resolution may be coarse)
+    import time as _time
+    _time.sleep(0.01)
+    target.write_text("changed2", encoding="utf-8")
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_different_offset_allowed(tmp_path):
+    """Different offset on same file is a distinct cache key — allowed."""
+    target = tmp_path / "file.py"
+    target.write_text("hello\nworld\n", encoding="utf-8")
+    env = _base_env(tmp_path, {"CCGATE_READ_CACHE_ENABLED": "1"})
+    payload1 = {"session_id": "rc4", "tool_name": "Read",
+                 "tool_input": {"file_path": str(target), "offset": 0, "limit": 5}}
+    payload2 = {"session_id": "rc4", "tool_name": "Read",
+                 "tool_input": {"file_path": str(target), "offset": 5, "limit": 5}}
+    _run(payload1, env)
+    r = _run(payload2, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_staletime_eviction_allows(tmp_path):
+    """After staleTimeMs, the cache entry is evicted and re-read is allowed."""
+    target = tmp_path / "file.py"
+    target.write_text("hello", encoding="utf-8")
+    # Set staleTimeMs to 0 via env var (immediate staleness)
+    env = _base_env(tmp_path, {
+        "CCGATE_READ_CACHE_ENABLED": "1",
+        "CCGATE_STALE_TIME_MS": "0",
+    })
+    payload = {"session_id": "rc5", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    _run(payload, env)  # first read
+    r = _run(payload, env)  # second read — staleTimeMs=0 → already stale → allow
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_stalefiles_eviction_allows(tmp_path):
+    """After staleFiles distinct files are read, cache entry is stale — re-read allowed."""
+    target = tmp_path / "main.py"
+    target.write_text("hello", encoding="utf-8")
+    # Set staleFiles to 0 via env var so ANY subsequent read makes entry stale
+    env = _base_env(tmp_path, {
+        "CCGATE_READ_CACHE_ENABLED": "1",
+        "CCGATE_STALE_FILES": "0",
+    })
+    payload = {"session_id": "rc6", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    _run(payload, env)  # first read of target
+    # Read a different file (adds to file_log after target's idx)
+    other = tmp_path / "other.py"
+    other.write_text("world", encoding="utf-8")
+    _run({"session_id": "rc6", "tool_name": "Read",
+          "tool_input": {"file_path": str(other)}}, env)
+    # Now re-read target — staleFiles=0 → effective=0, distinct_after=1 > 0 → stale → allow
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_disabled_passes_through(tmp_path):
+    """readCacheEnabled=false (default) → rule inactive, no deny."""
+    target = tmp_path / "file.py"
+    target.write_text("hello", encoding="utf-8")
+    env = _base_env(tmp_path)  # no CCGATE_READ_CACHE_ENABLED
+    payload = {"session_id": "rc7", "tool_name": "Read",
+                "tool_input": {"file_path": str(target)}}
+    _run(payload, env)
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_read_cache_missing_file_allowed(tmp_path):
+    """OSError on os.stat (file missing) → treat as changed → allow."""
+    env = _base_env(tmp_path, {"CCGATE_READ_CACHE_ENABLED": "1"})
+    ghost = str(tmp_path / "does_not_exist.py")
+    payload = {"session_id": "rc8", "tool_name": "Read",
+                "tool_input": {"file_path": ghost}}
+    _run(payload, env)  # first read (mtime=None recorded)
+    r = _run(payload, env)  # second read — mtime still None → no change?
+    # mtime=None on first, None on second → treat as "unchanged" → deny.
+    # Wait: spec says "OSError → treat as mtime changed → allow". So each call
+    # returns OSError → each call treats as changed → always allow.
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
