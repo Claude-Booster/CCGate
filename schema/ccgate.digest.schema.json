@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["digest_id", "exported_at", "ccgate_version", "path_stats", "sessions_analyzed"],
+  "additionalProperties": false,
+  "properties": {
+    "digest_id":          { "type": "string" },
+    "exported_at":        { "type": "string", "format": "date-time" },
+    "ccgate_version":     { "type": "string" },
+    "sessions_analyzed":  { "type": "integer", "minimum": 0 },
+    "date_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "first": { "type": "string" },
+        "last":  { "type": "string" }
+      }
+    },
+    "path_stats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "read_count", "cache_block_count"],
+        "additionalProperties": false,
+        "properties": {
+          "path":              { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).*" },
+          "read_count":        { "type": "integer", "minimum": 0 },
+          "cache_block_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
