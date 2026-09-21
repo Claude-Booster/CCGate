@@ -1,5 +1,7 @@
 """shape.py — static config lint (Phase 0). Checks: G2 (claudeMdLines), G3 (skillListing)."""
 import json
+import os
+import datetime
 import sys
 from pathlib import Path
 
@@ -279,6 +281,249 @@ def _check_output_caps(cwd: str | None) -> list[dict]:
     Phase 0 stub — requires state.py session history (Phase 1). Always returns [].
     """
     return []
+
+
+def _resolve_fix_path(file_str: str, cwd: str | None) -> Path:
+    """Resolve a fix file path. Tilde paths resolve via Path.home(); others relative to cwd."""
+    if file_str.startswith("~/"):
+        return Path.home() / file_str[2:]
+    if cwd:
+        return Path(cwd) / file_str
+    return Path(file_str)
+
+
+def _safe_json_patch(path: Path, action: str, key: str, value) -> None:
+    """json_set or json_append with backup → tmp → atomic replace. Raises on any error."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        original_text = path.read_text(encoding="utf-8")
+        path.with_name(path.name + ".ccgate-bak").write_text(original_text, encoding="utf-8")
+        data = json.loads(original_text)
+    else:
+        data = {}
+    # Navigate dotted key path: "permissions.deny" → data["permissions"]["deny"]
+    parts = key.split(".")
+    obj = data
+    for part in parts[:-1]:
+        obj = obj.setdefault(part, {})
+    leaf = parts[-1]
+    if action == "set":
+        obj[leaf] = value
+    elif action == "append":
+        arr = obj.setdefault(leaf, [])
+        if value not in arr:
+            arr.append(value)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _safe_create(path: Path, content: str) -> None:
+    """Write content to path only if the file does not already exist."""
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _safe_frontmatter_set(path: Path, key: str, value) -> None:
+    """Set a key in YAML frontmatter with backup → tmp → atomic replace."""
+    if not path.exists():
+        return
+    original_text = path.read_text(encoding="utf-8")
+    path.with_name(path.name + ".ccgate-bak").write_text(original_text, encoding="utf-8")
+    if not original_text.startswith("---"):
+        return
+    end = original_text.find("---", 3)
+    if end == -1:
+        return
+    frontmatter_text = original_text[3:end]
+    rest = original_text[end:]
+    yaml_val = str(value).lower() if isinstance(value, bool) else str(value)
+    key_line = f"{key}: {yaml_val}"
+    new_lines = [ln for ln in frontmatter_text.splitlines() if not ln.strip().startswith(f"{key}:")]
+    new_lines.append(key_line)
+    new_frontmatter = "\n".join(new_lines)
+    new_content = f"---{new_frontmatter}\n{rest}"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(new_content, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def stage_fixes(
+    cwd: str | None = None,
+    config: dict | None = None,
+    fix_skills: bool = False,
+) -> dict:
+    """Run checks and stage proposed fixes. Returns a fix report dict (applied=False).
+
+    Never writes to any settings or project file — only produces the dict.
+    """
+    if config is None:
+        from ccgate.config import DEFAULTS
+        config = DEFAULTS
+
+    fixes: list[dict] = []
+    skipped: list[dict] = []
+    settings = _load_settings(cwd)
+
+    # cacheTtl — fix targets global settings
+    if _check_cache_ttl(settings):
+        fixes.append({
+            "check": "cacheTtl",
+            "file": "~/.claude/settings.json",
+            "action": "json_set",
+            "key": "promptCacheTtl",
+            "value": "1h",
+            "description": "Set prompt cache TTL to 1 hour",
+        })
+
+    # denyReads — detect which dirs/patterns need coverage
+    if cwd:
+        deny_rules: list[str] = settings.get("permissions", {}).get("deny", [])
+        project = Path(cwd)
+        for dirname in _SENSITIVE_DIRS:
+            if (project / dirname).exists():
+                if not any(r.startswith(f"Read({dirname}/") for r in deny_rules):
+                    fixes.append({
+                        "check": "denyReads",
+                        "file": ".claude/settings.json",
+                        "action": "json_append",
+                        "key": "permissions.deny",
+                        "value": f"Read({dirname}/**/*)",
+                        "description": f"Deny reads of {dirname}/ directory",
+                    })
+        generated = [
+            p for p in project.rglob("*.generated.*")
+            if ".git" not in p.parts and "node_modules" not in p.parts
+        ]
+        if generated and not any("generated" in r for r in deny_rules):
+            fixes.append({
+                "check": "denyReads",
+                "file": ".claude/settings.json",
+                "action": "json_append",
+                "key": "permissions.deny",
+                "value": "Read(**/*.generated.*)",
+                "description": "Deny reads of generated files",
+            })
+
+    # worktreeSparse — fix targets project settings
+    if cwd and _check_worktree_sparse(cwd, settings):
+        project = Path(cwd)
+        manifests = []
+        for pattern in ("pyproject.toml", "package.json"):
+            for p in project.rglob(pattern):
+                if ".git" not in p.parts and "node_modules" not in p.parts:
+                    manifests.append(p)
+        sub_dirs = sorted({
+            str(p.parent.relative_to(project)).replace("\\", "/")
+            for p in manifests if p.parent != project
+        })
+        fixes.append({
+            "check": "worktreeSparse",
+            "file": ".claude/settings.json",
+            "action": "json_set",
+            "key": "worktree.sparsePaths",
+            "value": sub_dirs,
+            "description": "Set worktree sparse paths for monorepo packages",
+        })
+
+    # outputCaps — dormant stub; only emits a fix if the check fires (never in Phase 0)
+    if cwd and _check_output_caps(cwd):
+        fixes.append({
+            "check": "outputCaps",
+            "file": "~/.claude/settings.json",
+            "action": "json_set",
+            "key": "bashOutputMaxChars",
+            "value": 30000,
+            "description": "Cap bash output at 30,000 chars",
+        })
+
+    # claudeMdExcludes — create stub CLAUDE.md per unscoped sub-package
+    if cwd and _check_claudemd_excludes(cwd):
+        project = Path(cwd)
+        manifests = []
+        for pattern in ("pyproject.toml", "package.json"):
+            for p in project.rglob(pattern):
+                if ".git" not in p.parts and "node_modules" not in p.parts:
+                    manifests.append(p)
+        for manifest in manifests:
+            if manifest.parent == project:
+                continue
+            pkg_name = manifest.parent.name
+            claudemd = manifest.parent / "CLAUDE.md"
+            rel = str(claudemd.relative_to(project)).replace("\\", "/")
+            fixes.append({
+                "check": "claudeMdExcludes",
+                "file": rel,
+                "action": "create",
+                "content": f"# {pkg_name}\n",
+                "description": f"Create stub CLAUDE.md for package {pkg_name}",
+            })
+
+    # skillSideEffects — only staged when --fix-skills is passed
+    if fix_skills:
+        seen_skill_paths: set[str] = set()
+        for finding in _check_skill_side_effects(cwd):
+            # message format: "<path>: skill '<name>' ..."
+            skill_path_str = finding["message"].split(":")[0].strip()
+            # Deduplicate: global and cwd roots may resolve to the same file
+            resolved = str(Path(skill_path_str).resolve())
+            if resolved in seen_skill_paths:
+                continue
+            seen_skill_paths.add(resolved)
+            skill_path = Path(skill_path_str)
+            rel_str = skill_path_str.replace("\\", "/")
+            fixes.append({
+                "check": "skillSideEffects",
+                "file": rel_str,
+                "action": "frontmatter_set",
+                "key": "disable-model-invocation",
+                "value": True,
+                "description": f"Add disable-model-invocation to {skill_path.name}",
+            })
+
+    # Non-fixable: claudeMdLines — report in skipped
+    for _ in _check_claudemd_lines(_find_claudemd_files(cwd)):
+        skipped.append({
+            "check": "claudeMdLines",
+            "reason": "Cannot auto-fix: requires manual content reduction (run /doctor)",
+        })
+
+    # Non-fixable: skillListing — report in skipped
+    from ccgate.model import DEFAULT_WINDOW_TOKENS
+    total_chars = _measure_skill_descriptions(cwd)
+    budget_fraction = config.get("skillListingBudgetFraction", 0.01)
+    for _ in _check_skill_listing(total_chars, DEFAULT_WINDOW_TOKENS, budget_fraction):
+        skipped.append({
+            "check": "skillListing",
+            "reason": "Cannot auto-fix: requires manual description reduction (run /skill-doctor)",
+        })
+
+    cwd_str = str(Path(cwd).resolve()).replace("\\", "/") if cwd else str(Path.cwd()).replace("\\", "/")
+
+    try:
+        from importlib.metadata import version as _pkg_version
+        _version = _pkg_version("ccgate")
+    except Exception:
+        _version = "0.1.0"
+
+    return {
+        "generated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cwd": cwd_str,
+        "ccgate_version": _version,
+        "fixes": fixes,
+        "skipped": skipped,
+        "applied": False,
+        "applied_at": None,
+        "startup_chars_before": None,
+        "startup_chars_after": None,
+        "startup_tokens_before_approx": None,
+        "startup_tokens_after_approx": None,
+        "startup_delta_approx": None,
+    }
 
 
 def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
