@@ -58,9 +58,10 @@ def _run_eval(transcript_path: str, json_out: bool) -> tuple[int, str]:
             entry_type = entry.get("type")
             msg = entry.get("message") or {}
             content = msg.get("content") or ""
-            if isinstance(content, list):
-                text_parts = [p.get("text", "") for p in content if isinstance(p, dict)]
-                content = " ".join(text_parts)
+            # Keep structured content (including tool_use/tool_result blocks) intact
+            # so clear_tool_uses_20250919 has actual tool-use content to evaluate
+            if not isinstance(content, (str, list)):
+                content = str(content)
             if entry_type == "user":
                 messages.append({"role": "user", "content": content})
             elif entry_type == "assistant":
@@ -71,11 +72,11 @@ def _run_eval(transcript_path: str, json_out: bool) -> tuple[int, str]:
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    baseline_resp = client.beta.messages.count_tokens(
+    baseline_resp_obj = client.beta.messages.count_tokens(
         model=last_model,
         messages=messages,
     )
-    original_tokens: int = baseline_resp.input_tokens
+    original_before: int = baseline_resp_obj.input_tokens
 
     cleared_resp = client.beta.messages.count_tokens(
         model=last_model,
@@ -83,7 +84,6 @@ def _run_eval(transcript_path: str, json_out: bool) -> tuple[int, str]:
         context_management={"type": "clear_tool_uses_20250919"},
     )
     cleared_tokens: int = cleared_resp.input_tokens
-    original_before: int = cleared_resp.context_management.original_input_tokens
 
     raw_savings = original_before - cleared_tokens
     savings_tokens = max(0, raw_savings)
@@ -114,9 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Measure token savings from clear_tool_uses_20250919"
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--transcript", metavar="PATH",
-                       help="Path to a JSONL transcript file")
+    parser.add_argument("--transcript", metavar="PATH", required=True,
+                        help="Path to a JSONL transcript file")
     parser.add_argument("--json", action="store_true", dest="json_out",
                         help="Emit JSON output instead of human-readable")
     args = parser.parse_args(argv)

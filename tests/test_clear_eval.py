@@ -189,3 +189,49 @@ def test_model_id_from_last_turn(tmp_path, monkeypatch):
 
     # All count_tokens calls use the model from the LAST turn
     assert all(m == "claude-sonnet-5" for m in seen_models if m is not None)
+
+
+def test_tool_use_content_preserved_in_messages(tmp_path, monkeypatch):
+    """tool_use blocks must survive message reconstruction for clear_tool_uses to work."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    line = json.dumps({
+        "type": "assistant",
+        "timestamp": "2026-09-21T00:00:00Z",
+        "message": {
+            "model": "claude-sonnet-5",
+            "usage": {"input_tokens": 5000, "output_tokens": 100,
+                      "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            "content": [
+                {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {"command": "ls"}},
+                {"type": "text", "text": "Done."},
+            ],
+        },
+    })
+    transcript = tmp_path / "tool_session.jsonl"
+    transcript.write_text(line + "\n", encoding="utf-8")
+
+    captured_calls: list[dict] = []
+    fake_anthro = _fake_anthropic(original_tokens=5000, cleared_tokens=3000)
+    orig_side_effect = fake_anthro.Anthropic.return_value.beta.messages.count_tokens.side_effect
+
+    def capturing(**kwargs):
+        captured_calls.append(kwargs)
+        return orig_side_effect(**kwargs)
+
+    fake_anthro.Anthropic.return_value.beta.messages.count_tokens.side_effect = capturing
+
+    with patch.dict(sys.modules, {"anthropic": fake_anthro}):
+        import importlib
+        import ccgate.scripts.clear_eval as mod
+        importlib.reload(mod)
+        mod._run_eval(str(transcript), json_out=False)
+
+    assert captured_calls, "count_tokens was not called"
+    msgs = captured_calls[0]["messages"]
+    all_blocks = [
+        block
+        for msg in msgs
+        for block in (msg["content"] if isinstance(msg.get("content"), list) else [])
+    ]
+    block_types = {b.get("type") for b in all_blocks if isinstance(b, dict)}
+    assert "tool_use" in block_types, f"tool_use blocks not preserved in messages: {msgs}"

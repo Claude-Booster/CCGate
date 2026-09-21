@@ -15,6 +15,21 @@ from ccgate.state import ccgate_home
 _KNOWN_TYPES = frozenset({"input", "output", "cache_read", "cache_creation"})
 
 
+def _sanitize_session_id(session_id: str) -> str:
+    """Return safe session_id for filename use; fall back to 'unknown' if suspicious."""
+    if not session_id:
+        return "unknown"
+    # Reject traversal and separator characters
+    if (
+        ".." in session_id
+        or "/" in session_id
+        or "\\" in session_id
+        or os.path.isabs(session_id)
+    ):
+        return "unknown"
+    return session_id
+
+
 def parse_otlp_payload(payload: dict) -> dict:
     """Extract session_id and token counts from an OTLP JSON payload."""
     session_id = "unknown"
@@ -57,7 +72,8 @@ def _write_session_file(parsed: dict, source: str, home: Path | None = None) -> 
     h = home or ccgate_home()
     sessions_dir = h / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
-    out_path = sessions_dir / f"{parsed['session_id']}-otel.json"
+    safe_id = _sanitize_session_id(parsed["session_id"])
+    out_path = sessions_dir / f"{safe_id}-otel.json"
     data = {
         "session_id": parsed["session_id"],
         "collected_at": datetime.now(timezone.utc).isoformat(),
