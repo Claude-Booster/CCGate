@@ -41,3 +41,7 @@ def _usage() -> None:
         "  audit [paths]     Miss-cause attribution report\n"
         "  shape             Static config and CLAUDE.md lint\n"
     )
+
+
+if __name__ == "__main__":
+    main()
