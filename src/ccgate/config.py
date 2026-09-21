@@ -17,6 +17,8 @@ DEFAULTS: dict = {
     "staleFiles": 8,
     "staleTokenRatio": 0.10,
     "readCacheEnabled": False,
+    "contextignoreEnabled": False,
+    "bashRewriteEnabled": False,
     "skillListingBudgetFraction": 0.01,
     "bashRewriteRules": [],
 }
