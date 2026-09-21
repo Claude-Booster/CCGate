@@ -118,6 +118,9 @@ def render(payload: dict, config: dict) -> str:
 
 
 def main() -> None:
+    # Windows cp1252 cannot encode ▓░ — force UTF-8 so block chars render correctly
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     from ccgate.config import load_config
     try:
         payload = json.loads(sys.stdin.read())
