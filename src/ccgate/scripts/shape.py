@@ -323,6 +323,129 @@ def _stage_session_pinning(settings: dict, fixes: list) -> None:
             })
 
 
+def _is_first_party_base_url(url: str) -> bool:
+    """Return True if url points to an Anthropic first-party endpoint."""
+    return "anthropic.com" in url
+
+
+def _load_mcp_configs(cwd: str | None) -> list[tuple[str, dict]]:
+    """Return [(path_str, parsed_dict)] for each MCP config file found."""
+    candidates: list[Path] = [Path.home() / ".claude" / "mcp.json"]
+    if cwd:
+        candidates.extend([
+            Path(cwd) / ".claude" / "mcp.json",
+            Path(cwd) / ".mcp.json",
+        ])
+    result: list[tuple[str, dict]] = []
+    seen: set[Path] = set()
+    for p in candidates:
+        try:
+            resolved = p.resolve()
+        except OSError:
+            resolved = p
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                result.append((str(p).replace("\\", "/"), data))
+            except (json.JSONDecodeError, OSError):
+                pass
+    return result
+
+
+def _check_tool_deferral(settings: dict, cwd: str | None) -> list[dict]:
+    """A3/G21: flag gateway base URL without ENABLE_TOOL_SEARCH; flag alwaysLoad."""
+    findings: list[dict] = []
+    env_block = settings.get("env", {})
+    base_url = env_block.get("ANTHROPIC_BASE_URL", "")
+
+    if base_url and not _is_first_party_base_url(base_url):
+        if not env_block.get("ENABLE_TOOL_SEARCH"):
+            findings.append({
+                "check": "toolDeferral",
+                "severity": "error",
+                "message": (
+                    f"Non-first-party ANTHROPIC_BASE_URL ({base_url!r}) without "
+                    "ENABLE_TOOL_SEARCH=true. MCP tool definitions load upfront "
+                    "(~100K tokens), invalidating the cache on every "
+                    "connect/disconnect. Run 'ccgate shape --fix' to apply."
+                ),
+            })
+
+    for path_str, data in _load_mcp_configs(cwd):
+        servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
+        for name, server in servers.items():
+            if isinstance(server, dict) and server.get("alwaysLoad"):
+                findings.append({
+                    "check": "toolDeferral",
+                    "severity": "warning",
+                    "message": (
+                        f"MCP server {name!r} in {path_str} has 'alwaysLoad: true'. "
+                        "Tool definitions will be loaded into the prefix, "
+                        "invalidating the cache on connect/disconnect. "
+                        "Set alwaysLoad to false or remove it."
+                    ),
+                })
+
+    return findings
+
+
+def _stage_tool_deferral(
+    settings: dict, cwd: str | None, fixes: list, skipped: list
+) -> None:
+    """Append A3 fix/skip entries. Gateway URL → fix. alwaysLoad → skipped."""
+    env_block = settings.get("env", {})
+    base_url = env_block.get("ANTHROPIC_BASE_URL", "")
+
+    if base_url and not _is_first_party_base_url(base_url) and not env_block.get("ENABLE_TOOL_SEARCH"):
+        fixes.append({
+            "check": "toolDeferral",
+            "file": "~/.claude/settings.json",
+            "action": "json_set",
+            "key": "env.ENABLE_TOOL_SEARCH",
+            "value": "true",
+            "description": "Enable tool search deferral for non-first-party base URL (A3)",
+        })
+
+    for path_str, data in _load_mcp_configs(cwd):
+        servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
+        for name, server in servers.items():
+            if isinstance(server, dict) and server.get("alwaysLoad"):
+                skipped.append({
+                    "check": "toolDeferral",
+                    "reason": (
+                        f"Cannot auto-fix alwaysLoad on {name!r} in {path_str} — "
+                        "may be deliberate. Remove or set to false manually."
+                    ),
+                })
+
+
+def _summarize_tool_deferral(cwd: str | None) -> list[dict]:
+    """Emit one info-level summary of MCP server deferral state."""
+    configs = _load_mcp_configs(cwd)
+    total = 0
+    always_loaded = 0
+    for _, data in configs:
+        servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
+        for server in servers.values():
+            total += 1
+            if isinstance(server, dict) and server.get("alwaysLoad"):
+                always_loaded += 1
+    if total == 0:
+        return []
+    deferred = total - always_loaded
+    return [{
+        "check": "toolDeferralSummary",
+        "severity": "info",
+        "message": (
+            f"MCP servers: {total} total, {deferred} deferred, "
+            f"{always_loaded} always-loaded."
+        ),
+    }]
+
+
 def _check_cache_ttl(settings: dict) -> list[dict]:
     """cacheTtl: API-key or cloud-provider auth with promptCacheTtl unset."""
     has_api_indicators = "apiKeyHelper" in settings or "cloudProviderId" in settings
@@ -520,6 +643,10 @@ def stage_fixes(
     # sessionPinning (A1) — fix targets global settings
     if config.get("pinCacheTtl", True):
         _stage_session_pinning(settings, fixes)
+
+    # toolDeferral (A3) — fix targets global settings; alwaysLoad goes to skipped
+    if config.get("enforceToolDeferral", True):
+        _stage_tool_deferral(settings, cwd, fixes, skipped)
 
     # denyReads — detect which dirs/patterns need coverage
     if cwd:
@@ -743,6 +870,8 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     findings.extend(_check_worktree_sparse(cwd, settings))
     findings.extend(_check_output_caps(cwd))
     findings.extend(_check_session_pinning(settings))
+    findings.extend(_check_tool_deferral(settings, cwd))
+    findings.extend(_summarize_tool_deferral(cwd))
 
     return findings
 

@@ -20,6 +20,8 @@ DEFAULTS: dict = {
     "contextignoreEnabled": False,
     "bashRewriteEnabled": False,
     "pinCacheTtl": True,
+    "enforceToolDeferral": True,
+    "toolCountJumpThreshold": 30,
     "pinnedModel": None,
     "pinnedEffort": None,
     "skillListingBudgetFraction": 0.01,
@@ -44,6 +46,7 @@ _RANGE: dict[str, tuple] = {
     "startupTokenCap": (1, 200_000),
     "otelPort":        (1024, 65535),
     "digestMaxPaths":  (1, 10_000),
+    "toolCountJumpThreshold": (0, 10_000),
 }
 
 def load_config(cwd: str | None = None) -> dict:
