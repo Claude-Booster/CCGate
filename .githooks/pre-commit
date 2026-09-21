@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+# Blocks commits that expose restricted identifiers.
+#
+# Checks (in order):
+#   1. git config user.name / user.email
+#   2. GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL
+#   3. GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL
+#   4. OS fallback: USERNAME / USERDOMAIN / COMPUTERNAME
+#      (only when git config is unset — the condition git itself falls back)
+#   5. Staged file content (.githooks/ excluded)
+#
+# Activate: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+# ── Patterns (variable names are intentionally opaque) ─────────────────────────
+P1="Developer|Developer|developer|developer"
+P2="example.com|Corp"
+_C="$P1|$P2"
+
+FAIL=0
+
+_check() {
+  local label="$1" value="$2"
+  [[ -z "$value" ]] && return 0
+  if printf '%s' "$value" | grep -qiE "$_C"; then
+    printf '[pre-commit] BLOCKED (%s): restricted identifier detected.\n' "$label" >&2
+    printf '  Fix: git config user.name  "Developer"\n' >&2
+    printf '       git config user.email "fredman08@users.noreply.github.com"\n' >&2
+    FAIL=1
+  fi
+}
+
+# ── 1. git config ──────────────────────────────────────────────────────────────
+_check "user.name"  "$(git config user.name  2>/dev/null || true)"
+_check "user.email" "$(git config user.email 2>/dev/null || true)"
+
+# ── 2. GIT_AUTHOR_* ────────────────────────────────────────────────────────────
+_check "GIT_AUTHOR_NAME"  "${GIT_AUTHOR_NAME:-}"
+_check "GIT_AUTHOR_EMAIL" "${GIT_AUTHOR_EMAIL:-}"
+
+# ── 3. GIT_COMMITTER_* ─────────────────────────────────────────────────────────
+_check "GIT_COMMITTER_NAME"  "${GIT_COMMITTER_NAME:-}"
+_check "GIT_COMMITTER_EMAIL" "${GIT_COMMITTER_EMAIL:-}"
+
+# ── 4. OS fallback ─────────────────────────────────────────────────────────────
+# Only when git config is unset — that is when git would actually use OS identity.
+_git_name="$(git config user.name  2>/dev/null || true)"
+_git_email="$(git config user.email 2>/dev/null || true)"
+if [[ -z "$_git_name" || -z "$_git_email" ]]; then
+  _check "OS username" "${USERNAME:-$(whoami 2>/dev/null || true)}"
+  _check "OS domain"   "${USERDOMAIN:-}"
+  _check "OS hostname" "${COMPUTERNAME:-$(hostname 2>/dev/null || true)}"
+fi
+
+# ── 5. Staged file content ─────────────────────────────────────────────────────
+# .githooks/ is excluded — the hook itself contains the pattern strings and
+# scanning it would self-trigger on variable assignments.
+while IFS= read -r _file; do
+  [[ -z "$_file" ]] && continue
+  [[ "$_file" == .githooks/* ]] && continue
+  if git show ":$_file" 2>/dev/null | grep -qiE "$_C"; then
+    printf '[pre-commit] BLOCKED (%s): staged content contains a restricted identifier.\n' "$_file" >&2
+    FAIL=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [[ $FAIL -ne 0 ]]; then
+  printf '\nCommit blocked. Remove the restricted content and retry.\n' >&2
+  exit 1
+fi

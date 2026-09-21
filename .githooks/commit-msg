@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# .githooks/commit-msg
+# Blocks commit messages that contain restricted identifiers.
+# Fires for every commit: initial, amend, merge, squash, rebase fixup.
+# $1 = path to the file containing the commit message.
+
+set -euo pipefail
+
+# ── Patterns (variable names are intentionally opaque) ─────────────────────────
+P1="Developer|Developer|developer|developer"
+P2="example.com|Corp"
+_C="$P1|$P2"
+
+MSG_FILE="${1:?commit-msg: missing message file argument}"
+
+if grep -qiE "$_C" "$MSG_FILE"; then
+  printf '[commit-msg] BLOCKED: commit message contains a restricted identifier.\n' >&2
+  printf '  Edit the message and retry.\n' >&2
+  exit 1
+fi
