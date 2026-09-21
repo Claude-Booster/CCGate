@@ -1,0 +1,5 @@
+# baseline fixture — calibrated 2026-09-21
+# input_tokens=8000 reflects realistic startup footprint: plugin manifest + 1 CLAUDE.md + skills listing
+# update this value if ccgate's startup footprint grows toward the 12000 cap
+# parser (baseline.py) skips non-JSON lines — this comment header is intentional
+{"type":"assistant","timestamp":"2026-09-21T00:00:00Z","message":{"model":"claude-sonnet-5","usage":{"input_tokens":8000,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"ccgate startup fixture"}]}}
