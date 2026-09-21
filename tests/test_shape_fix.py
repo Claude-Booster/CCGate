@@ -74,6 +74,9 @@ class TestStageFixes:
         assert skill_fix["action"] == "frontmatter_set"
         assert skill_fix["key"] == "disable-model-invocation"
         assert skill_fix["value"] is True
+        # file field must be the full skill path — not just drive letter on Windows
+        assert "SKILL.md" in skill_fix["file"]
+        assert "\\" not in skill_fix["file"]  # G10: forward slashes
 
     def test_report_schema(self, tmp_path):
         """Staged report validates against schema/ccgate.fix-report.schema.json (G9)."""
@@ -209,6 +212,31 @@ class TestApplyFixes:
         assert applied["startup_tokens_after_approx"] is not None
         assert applied["startup_delta_approx"] is not None
         assert applied["startup_delta_approx"] >= 0  # I3: never negative
+
+    def test_apply_frontmatter_set(self, tmp_path):
+        """apply_fixes() injects frontmatter key into a SKILL.md (frontmatter_set action)."""
+        skill_dir = tmp_path / ".claude" / "skills" / "my-deploy"
+        skill_dir.mkdir(parents=True)
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            "---\nname: my-deploy\ndescription: deploys stuff\n---\nDo it.\n",
+            encoding="utf-8",
+        )
+        rel = str(skill_file).replace("\\", "/")
+        report = self._base_report(tmp_path, fixes=[{
+            "check": "skillSideEffects",
+            "file": rel,
+            "action": "frontmatter_set",
+            "key": "disable-model-invocation",
+            "value": True,
+            "description": "Add disable-model-invocation to SKILL.md",
+        }])
+        with patch("ccgate.scripts.shape.Path.home", return_value=tmp_path):
+            apply_fixes(report)
+        content = skill_file.read_text(encoding="utf-8")
+        assert "disable-model-invocation: true" in content
+        assert "name: my-deploy" in content
+        assert "Do it." in content
 
     def test_report_paths_windows(self, tmp_path):
         """Report cwd and fix file fields use forward slashes (G10)."""
