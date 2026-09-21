@@ -604,6 +604,14 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     return findings
 
 
+def _find_latest_fix_report(reports_dir: Path) -> Path | None:
+    """Return the most recently modified fix-*.json file, or None if none exist."""
+    candidates = list(reports_dir.glob("fix-*.json")) if reports_dir.exists() else []
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
     from ccgate.config import load_config
@@ -613,9 +621,55 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--json", action="store_true", dest="emit_json")
     parser.add_argument("--assert", action="store_true", dest="assert_mode",
                         help="Exit 1 on any error-severity finding")
+    parser.add_argument("--fix", action="store_true",
+                        help="Stage proposed fixes to ~/.ccgate/reports/")
+    parser.add_argument("--apply", action="store_true",
+                        help="Apply the most recent staged fix file")
+    parser.add_argument("--fix-skills", action="store_true", dest="fix_skills",
+                        help="Include skill frontmatter fixes (requires --fix)")
     args = parser.parse_args(argv)
 
     config = load_config(args.cwd)
+
+    if args.fix or args.apply:
+        reports_dir = Path.home() / ".ccgate" / "reports"
+        report = None
+        report_path = None
+
+        if args.fix:
+            report = stage_fixes(args.cwd, config, fix_skills=args.fix_skills)
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            report_path = reports_dir / f"fix-{ts}.json"
+            report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            if not report["fixes"] and not report["skipped"]:
+                print("ccgate shape --fix: no fixable issues found")
+            else:
+                for fix in report["fixes"]:
+                    print(f"  + [{fix['check']}] {fix['description']}  →  {fix['file']}")
+                for sk in report["skipped"]:
+                    print(f"  ~ [{sk['check']}] skipped: {sk['reason']}")
+                if not args.apply:
+                    print(f"\nStaged to {report_path}")
+                    print("Run 'ccgate shape --apply' to apply these fixes.")
+
+        if args.apply:
+            if report is None:
+                report_path = _find_latest_fix_report(reports_dir)
+                if report_path is None:
+                    print("ccgate shape --apply: no staged fix file found. Run --fix first.")
+                    sys.exit(1)
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            updated = apply_fixes(report)
+            report_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
+            delta = updated.get("startup_delta_approx") or 0
+            print(f"Fixes applied. Startup overhead reduced by ~{delta:,} tokens (estimated).")
+            if delta < 2000:
+                print("  → Delta under 2,000 tokens. Repo was already lean — verify Phase 2 ROI before building.")
+            else:
+                print(f"  → Meaningful reduction. Phase 2 baseline captured in {report_path.name}")
+        return
+
     findings = run_shape(args.cwd, config)
 
     if args.emit_json:
