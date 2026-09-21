@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,9 @@ def _session_input_tokens(transcript_path: str) -> int:
 
 
 def main() -> None:
+    if os.environ.get("CCGATE_DISABLE") == "1":
+        sys.exit(0)
+
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}

@@ -290,8 +290,8 @@ def test_read_cache_missing_file_allowed(tmp_path):
 # ── bash rewriting ────────────────────────────────────────────────────────────
 
 
-def test_bash_rewrite_pytest_gets_tail(tmp_path):
-    """'pytest' command gets '2>&1 | tail -100' appended."""
+def test_bash_rewrite_pytest_gets_class_a(tmp_path):
+    """'pytest' command gets Class A quiet flag '-q' appended (preferred over pipe filter)."""
     env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
     payload = {"session_id": "b1", "tool_name": "Bash",
                 "tool_input": {"command": "pytest tests/ -v"}}
@@ -299,7 +299,18 @@ def test_bash_rewrite_pytest_gets_tail(tmp_path):
     assert r.returncode == 0
     out = json.loads(r.stdout)
     assert "updatedInput" in out
-    assert out["updatedInput"]["command"] == "pytest tests/ -v 2>&1 | tail -100"
+    assert out["updatedInput"]["command"] == "pytest tests/ -v -q"
+
+
+def test_bash_rewrite_pytest_class_b_when_quiet_present(tmp_path):
+    """pytest with -q already → Class B with pipefail (G13)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "b1b", "tool_name": "Bash",
+                "tool_input": {"command": "pytest tests/ -q"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["updatedInput"]["command"] == "set -o pipefail; pytest tests/ -q 2>&1 | tail -n 40"
 
 
 def test_bash_rewrite_grep_gets_head(tmp_path):
@@ -382,12 +393,104 @@ def test_bash_rewrite_not_applied_to_read(tmp_path):
 
 
 def test_bash_rewrite_leading_whitespace_stripped_for_match(tmp_path):
-    """Leading whitespace before command is stripped before prefix matching."""
+    """Leading whitespace before command is stripped for prefix matching; Class A appended to original."""
     env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
     payload = {"session_id": "b8", "tool_name": "Bash",
                 "tool_input": {"command": "  pytest tests/"}}
     r = _run(payload, env)
     assert r.returncode == 0
     out = json.loads(r.stdout)
-    # Original command preserved; filter appended to original (with leading spaces)
-    assert out["updatedInput"]["command"] == "  pytest tests/ 2>&1 | tail -100"
+    assert out["updatedInput"]["command"] == "  pytest tests/ -q"
+
+
+# ── G12: compound refusal ─────────────────────────────────────────────────────
+
+
+def test_bash_rewrite_compound_and_passes_through(tmp_path):
+    """Command with && passes through unchanged (G12 compound refusal)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g12a", "tool_name": "Bash",
+                "tool_input": {"command": "pytest tests/ && echo done"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_compound_pipe_passes_through(tmp_path):
+    """Command already containing | passes through unchanged (G12)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g12b", "tool_name": "Bash",
+                "tool_input": {"command": "grep foo . | head -5"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_compound_redirect_passes_through(tmp_path):
+    """Command with > redirect passes through unchanged (G12)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g12c", "tool_name": "Bash",
+                "tool_input": {"command": "find . > output.txt"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_compound_subshell_passes_through(tmp_path):
+    """Command with $( subshell passes through unchanged (G12)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g12d", "tool_name": "Bash",
+                "tool_input": {"command": "pytest $(git diff --name-only)"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_bash_rewrite_multiline_passes_through(tmp_path):
+    """Multiline command passes through unchanged (G12)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g12e", "tool_name": "Bash",
+                "tool_input": {"command": "pytest tests/\necho done"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+# ── G13: pipefail in Class B ──────────────────────────────────────────────────
+
+
+def test_bash_rewrite_npm_test_gets_class_a(tmp_path):
+    """'npm test' without --silent gets Class A flag."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g13a", "tool_name": "Bash",
+                "tool_input": {"command": "npm test"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    assert out["updatedInput"]["command"] == "npm test --silent"
+
+
+def test_bash_rewrite_class_b_includes_pipefail(tmp_path):
+    """Class B rewrite includes 'set -o pipefail' prefix (G13)."""
+    env = _base_env(tmp_path, {"CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "g13b", "tool_name": "Bash",
+                "tool_input": {"command": "go test ./..."}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    out = json.loads(r.stdout)
+    cmd = out["updatedInput"]["command"]
+    assert cmd.startswith("set -o pipefail; ")
+    assert "2>&1 | tail -n 40" in cmd
+
+
+# ── F0.2: kill switch ─────────────────────────────────────────────────────────
+
+
+def test_ccgate_disable_kills_hook(tmp_path):
+    """CCGATE_DISABLE=1 causes hook to exit immediately with no output."""
+    env = _base_env(tmp_path, {"CCGATE_DISABLE": "1", "CCGATE_BASH_REWRITE_ENABLED": "1"})
+    payload = {"session_id": "ks1", "tool_name": "Bash",
+                "tool_input": {"command": "pytest tests/"}}
+    r = _run(payload, env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
