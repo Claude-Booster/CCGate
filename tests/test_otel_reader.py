@@ -199,3 +199,13 @@ def test_server_wrong_path_returns_404(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=3)
+
+
+def test_session_id_path_traversal_sanitized(tmp_path):
+    """Malicious session_id must not write outside the sessions directory."""
+    from ccgate.scripts.otel_reader import _sanitize_session_id
+    assert _sanitize_session_id("../../evil") == "unknown"
+    assert _sanitize_session_id("../etc/passwd") == "unknown"
+    assert _sanitize_session_id("valid-session-123") == "valid-session-123"
+    assert _sanitize_session_id("") == "unknown"
+    assert _sanitize_session_id("/etc/shadow") == "unknown"
