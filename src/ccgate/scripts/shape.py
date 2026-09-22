@@ -573,9 +573,17 @@ def _safe_json_patch(path: Path, action: str, key: str, value) -> None:
         arr = obj.setdefault(leaf, [])
         if value not in arr:
             arr.append(value)
+    new_text = json.dumps(data, indent=2)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    tmp.write_text(new_text, encoding="utf-8")
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        # Windows: Claude Code holds settings.json with no FILE_SHARE_DELETE,
+        # blocking os.replace() (which needs rename/delete on the target).
+        # A direct write only needs FILE_SHARE_WRITE, which succeeds.
+        tmp.unlink(missing_ok=True)
+        path.write_text(new_text, encoding="utf-8")
 
 
 def _safe_create(path: Path, content: str) -> None:
