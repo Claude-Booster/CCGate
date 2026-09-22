@@ -224,3 +224,19 @@ class TestStagePinEnv:
         pin_keys = [f["key"] for f in report["fixes"] if f["check"] == "sessionPinning"]
         assert "env.ENABLE_PROMPT_CACHING_1H" not in pin_keys
         assert "env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL" not in pin_keys
+
+    def test_apply_falls_back_on_permission_error(self, tmp_path):
+        """Windows WinError 5: os.replace() failure falls back to direct write."""
+        import os
+        from ccgate.scripts.shape import _safe_json_patch
+
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"existing": True}), encoding="utf-8")
+
+        with patch("ccgate.scripts.shape.os.replace", side_effect=PermissionError("WinError 5")):
+            _safe_json_patch(settings_file, "set", "env.ENABLE_PROMPT_CACHING_1H", "1")
+
+        result = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert result["env"]["ENABLE_PROMPT_CACHING_1H"] == "1"
+        assert result["existing"] is True
+        assert not (tmp_path / "settings.json.tmp").exists()
