@@ -1,0 +1,21 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Read|Edit|Write|Bash",
+      "hooks": [
+        {"type": "command", "command": "python -m ccgate.hooks.pre_tool"}
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Read|Edit|Write|Glob|Grep|Bash|Agent|mcp__.*",
+      "hooks": [{"type": "command", "command": "python -m ccgate.hooks.post_tool"}]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "hooks": [{"type": "command", "command": "python -m ccgate.hooks.session_end"}]
+    }
+  ]
+}

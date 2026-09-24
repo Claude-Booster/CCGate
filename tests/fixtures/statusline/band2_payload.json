@@ -1,0 +1,11 @@
+{
+  "model": {"id": "claude-sonnet-5"},
+  "context_window": {"used_percentage": 52, "context_window_size": 200000,
+    "current_usage": {"input_tokens": 104000, "output_tokens": 1200,
+      "cache_creation_input_tokens": 2000, "cache_read_input_tokens": 95000}},
+  "prompt_cache": {"warm": true, "caching_observed": true, "ttl": 3600,
+    "requests": 8, "misses": 1, "hit_ratio": 0.875,
+    "recache_tokens_if_cold": 95000},
+  "cost": {"total_cost_usd": 0.48},
+  "session_id": "band2-test"
+}
