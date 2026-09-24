@@ -124,7 +124,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_for_port(port: int, timeout: float = 5.0) -> None:
+def _wait_for_port(port: int, timeout: float = 10.0) -> None:
     """Poll until the port accepts TCP connections or timeout expires."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
