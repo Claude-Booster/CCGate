@@ -4,6 +4,8 @@ import re
 import sys
 from pathlib import Path
 
+from ccgate.state import ccgate_home
+
 # Schema-derived defaults — single source of truth.
 DEFAULTS: dict = {
     "hitRatioFloor": 0.85,
@@ -21,6 +23,9 @@ DEFAULTS: dict = {
     "bashRewriteEnabled": False,
     "pinCacheTtl": True,
     "enforceToolDeferral": True,
+    "compactRecovery": True,
+    "taskStateMaxTokens": 2500,
+    "compactInstructions": "Context recovered after compaction. Use this to resume where you left off.",
     "toolCountJumpThreshold": 30,
     "pinnedModel": None,
     "pinnedEffort": None,
@@ -47,6 +52,7 @@ _RANGE: dict[str, tuple] = {
     "otelPort":        (1024, 65535),
     "digestMaxPaths":  (1, 10_000),
     "toolCountJumpThreshold": (0, 10_000),
+    "taskStateMaxTokens": (100, 2500),
 }
 
 def load_config(cwd: str | None = None) -> dict:
@@ -57,7 +63,7 @@ def load_config(cwd: str | None = None) -> dict:
     Arrays (bashRewriteRules) are merged (project appends to global).
     """
     cfg = dict(DEFAULTS)
-    _merge_file(cfg, Path.home() / ".ccgate" / "config.json")
+    _merge_file(cfg, ccgate_home() / "config.json")
     if cwd:
         _merge_file(cfg, Path(cwd) / ".ccgate" / "config.json")
     # Environment overrides: CCGATE_HIT_RATIO_FLOOR → hitRatioFloor
