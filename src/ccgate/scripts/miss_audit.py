@@ -211,12 +211,25 @@ def main(argv: list[str] | None = None) -> None:
     config = load_config()
     paths: list[Path] = list(args.paths)
 
+    since_dt = None
+    if args.since and not paths:
+        from datetime import datetime, timedelta, timezone
+        import re as _re
+        m = _re.fullmatch(r"(\d+(?:\.\d+)?)\s*([smhd])", args.since.strip())
+        if m:
+            value, unit = float(m.group(1)), m.group(2)
+            seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit] * value
+            since_dt = datetime.now(tz=timezone.utc) - timedelta(seconds=seconds)
+        else:
+            print(f"ccgate audit: unrecognised --since value {args.since!r} (use e.g. 1d, 6h)", file=sys.stderr)
+            sys.exit(1)
+
     if not paths and args.session:
         from ccgate.transcript import find_transcripts
         paths = find_transcripts(session_id=args.session)
     if not paths:
         from ccgate.transcript import find_transcripts
-        paths = find_transcripts()
+        paths = find_transcripts(since_dt=since_dt)
 
     if not paths:
         print("ccgate audit: no transcripts found", file=sys.stderr)
