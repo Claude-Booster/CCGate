@@ -1,0 +1,28 @@
+{
+  "resourceMetrics": [{
+    "resource": {
+      "attributes": [
+        {"key": "session.id", "value": {"stringValue": "fixture-session-001"}}
+      ]
+    },
+    "scopeMetrics": [{
+      "metrics": [{
+        "name": "claude_code.token.usage",
+        "sum": {
+          "dataPoints": [
+            {"attributes": [{"key": "type", "value": {"stringValue": "input"}}],
+             "asInt": "12345"},
+            {"attributes": [{"key": "type", "value": {"stringValue": "output"}}],
+             "asInt": "678"},
+            {"attributes": [{"key": "type", "value": {"stringValue": "cache_read"}}],
+             "asInt": "9800"},
+            {"attributes": [{"key": "type", "value": {"stringValue": "cache_creation"}}],
+             "asInt": "500"},
+            {"attributes": [{"key": "type", "value": {"stringValue": "experimental_new_type"}}],
+             "asInt": "42"}
+          ]
+        }
+      }]
+    }]
+  }]
+}

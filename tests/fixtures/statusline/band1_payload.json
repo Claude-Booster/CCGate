@@ -1,0 +1,8 @@
+{
+  "model": {"id": "claude-sonnet-5"},
+  "context_window": {"used_percentage": 52, "context_window_size": 200000,
+    "current_usage": {"input_tokens": 104000, "output_tokens": 1200,
+      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}},
+  "cost": {"total_cost_usd": 1.24},
+  "session_id": "band1-test"
+}

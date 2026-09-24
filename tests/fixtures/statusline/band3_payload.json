@@ -1,0 +1,13 @@
+{
+  "model": {"id": "claude-opus-5"},
+  "effort": {"level": "normal"},
+  "fast_mode": false,
+  "context_window": {"used_percentage": 41, "context_window_size": 200000,
+    "current_usage": {"input_tokens": 82000, "output_tokens": 800,
+      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 75000}},
+  "prompt_cache": {"warm": true, "caching_observed": true, "ttl": 3600,
+    "requests": 12, "misses": 0, "hit_ratio": 0.92,
+    "miss_causes": {}, "recache_tokens_if_cold": 75000},
+  "cost": {"total_cost_usd": 2.10},
+  "session_id": "band3-test"
+}
