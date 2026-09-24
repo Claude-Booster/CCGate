@@ -124,6 +124,18 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _wait_for_port(port: int, timeout: float = 5.0) -> None:
+    """Poll until the port accepts TCP connections or timeout expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError(f"Server did not bind on port {port} within {timeout}s")
+
+
 def test_server_post_returns_200(tmp_path):
     port = _free_port()
     env = {**os.environ, "PYTHONPATH": str(WORKTREE / "src"),
@@ -134,7 +146,7 @@ def test_server_post_returns_200(tmp_path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
-        time.sleep(0.5)  # give server time to bind
+        _wait_for_port(port)
         payload = FIXTURE.read_text().encode()
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/metrics",
@@ -159,7 +171,7 @@ def test_server_bad_json_returns_400(tmp_path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
-        time.sleep(0.5)
+        _wait_for_port(port)
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/metrics",
             data=b"not json",
@@ -186,7 +198,7 @@ def test_server_wrong_path_returns_404(tmp_path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
-        time.sleep(0.5)
+        _wait_for_port(port)
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/wrong/path",
             method="GET",
