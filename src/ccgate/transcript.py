@@ -105,11 +105,37 @@ def read_transcript(path: Path) -> list[Request]:
     return requests
 
 
+def _first_transcript_timestamp(path: Path) -> str | None:
+    """Return the ISO timestamp of the first assistant entry, or None if unreadable."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("type") == "assistant":
+                    return e.get("timestamp") or None
+    except OSError:
+        pass
+    return None
+
+
 def find_transcripts(
     session_id: str | None = None,
     cwd: str | None = None,
+    since_dt=None,  # datetime | None — include sessions whose first timestamp >= since_dt
 ) -> list[Path]:
-    """Return JSONL paths for a session, all sessions in a cwd, or all sessions."""
+    """Return JSONL paths for a session, all sessions in a cwd, or all sessions.
+
+    When since_dt is provided, each file's first assistant timestamp is compared
+    against it; files with no parseable timestamp are included (fail-open).
+    mtime is intentionally not used — OneDrive and other sync tools touch files
+    without reflecting session age.
+    """
     base = Path.home() / ".claude" / "projects"
     if cwd is not None:
         project_dir = base / encode_cwd(cwd)
@@ -118,8 +144,29 @@ def find_transcripts(
         if session_id:
             p = project_dir / f"{session_id}.jsonl"
             return [p] if p.exists() else []
-        return sorted(project_dir.glob("*.jsonl"))
-    return sorted(base.rglob("*.jsonl"))
+        paths = sorted(project_dir.glob("*.jsonl"))
+    else:
+        paths = sorted(base.rglob("*.jsonl"))
+
+    if since_dt is None:
+        return paths
+
+    from datetime import timezone
+    cutoff = since_dt if since_dt.tzinfo else since_dt.replace(tzinfo=timezone.utc)
+    filtered: list[Path] = []
+    for p in paths:
+        ts = _first_transcript_timestamp(p)
+        if ts is None:
+            filtered.append(p)  # fail-open: include if timestamp unreadable
+            continue
+        try:
+            from datetime import datetime
+            t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if t >= cutoff:
+                filtered.append(p)
+        except ValueError:
+            filtered.append(p)  # fail-open on unparseable timestamp
+    return filtered
 
 
 class Classification(Enum):
