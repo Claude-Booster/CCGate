@@ -14,6 +14,16 @@ All four inherit the invariants in `BUILD-SPEC.md` §1.2. Three are restated bec
 
 ## F0 — Shared machinery
 
+### F0.0 Per-invocation interpreter cost — decide before building F1/F3 (measured 2026-09-24)
+
+F1 and F3 add a `PreToolUse` hook that runs on **every** Read/Edit/Write/Bash. That is a Python process spawn per tool call, and on the reference Windows machine the *interpreter startup alone* — no ccgate work — measured ~1.4 s via a fast shell (PowerShell), and 5–25 s when the interpreter resolved through the WindowsApps App Execution Alias stub or was spawned via Git Bash (MSYS fork emulation). G7's 50 ms budget was written for this hook; ~1.4 s is 28× over it, and that is the *floor* after the alias trap is removed.
+
+Two findings feed this:
+- Bare `python` on this machine resolves to a 0-byte WindowsApps alias stub adding ~5 s of AppX activation per launch. `shape` now lints for this (`hookInterpreter` check); the machine-level remedy is toggling the alias off in Windows Settings.
+- Even the real interpreter starts in ~1.4 s here (healthy baseline ~200 ms), the excess suspected to be Defender scanning of `python.exe`/site-packages (needs an admin-set exclusion to confirm and measure).
+
+**Decision required before F1/F3:** whether the per-call denial path can be a fresh Python process at all on Windows, or whether it needs a resident process (daemon/socket) or a compiled shim. A1/A3/A4/A5 are fine as-is — they run once per session or per compaction, where 1.4 s is invisible. The per-tool-call rules are the ones at risk. Decide this before building three denial rules on top of an unviable substrate.
+
 ### F0.1 Intent override (`user_prompt.py`)
 
 Required by F1 and F3. Without it both will eventually deny a file the user explicitly asked for.

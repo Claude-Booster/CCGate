@@ -2,6 +2,8 @@
 import json
 import os
 import datetime
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +12,14 @@ from ccgate.state import ccgate_home
 
 _CHARS_PER_TOKEN = 4
 _CLAUDEMD_MAX_LINES = 200
+
+_ALIAS_INTERPRETERS = ("python", "python3", "pythonw")
+# A bare interpreter token: not preceded by a path separator, word char, or dot
+# (so absolute paths like C:\...\python.exe are excluded), optionally suffixed
+# with .exe, and followed by whitespace (i.e. it carries arguments).
+_BARE_PY_RE = re.compile(
+    r"(?<![\w\\/.])(?:" + "|".join(_ALIAS_INTERPRETERS) + r")(?:\.exe)?(?=\s)"
+)
 
 
 def _check_claudemd_lines(paths: list[Path]) -> list[dict]:
@@ -852,6 +862,79 @@ def apply_fixes(report: dict) -> dict:
     }
 
 
+def _needs_restart_notice(fixes: list[dict]) -> bool:
+    """True if any fix touches settings.json or hooks.json, whose changes Claude Code
+    reads only at session start — they take effect one session late, not immediately."""
+    return any(
+        str(f.get("file", "")).endswith(("settings.json", "hooks.json"))
+        for f in fixes
+    )
+
+
+def _resolves_to_windowsapps_alias(interpreter: str) -> bool:
+    """True if a bare interpreter name resolves via PATH to a Windows App Execution
+    Alias stub (a 0-byte reparse point under WindowsApps that adds seconds of AppX
+    activation latency per launch)."""
+    resolved = shutil.which(interpreter)
+    if not resolved:
+        return False
+    return "windowsapps" in resolved.replace("\\", "/").lower()
+
+
+def _iter_hook_commands(settings: dict):
+    """Yield (event, command) for every type=command hook in settings['hooks']."""
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event, matchers in hooks.items():
+        if not isinstance(matchers, list):
+            continue
+        for matcher in matchers:
+            if not isinstance(matcher, dict):
+                continue
+            for hook in matcher.get("hooks") or []:
+                if isinstance(hook, dict) and hook.get("type") == "command":
+                    cmd = hook.get("command")
+                    if isinstance(cmd, str):
+                        yield event, cmd
+
+
+def _command_uses_bare_alias_python(command: str) -> bool:
+    """True if the command invokes a bare python/python3/pythonw interpreter
+    (resolved via PATH) rather than an absolute path."""
+    return bool(_BARE_PY_RE.search(command))
+
+
+def _check_hook_interpreters(settings: dict) -> list[dict]:
+    """Flag hook commands that invoke a bare python interpreter which resolves to a
+    Windows App Execution Alias. The failure is invisible — a silent multi-second
+    latency tax on every hook launch — and machine-specific, so warn rather than
+    auto-fix: the remedy is toggling the alias off in Windows Settings, not a file
+    edit."""
+    if not any(_resolves_to_windowsapps_alias(i) for i in _ALIAS_INTERPRETERS):
+        return []
+    events: list[str] = []
+    seen: set[str] = set()
+    for event, cmd in _iter_hook_commands(settings):
+        if _command_uses_bare_alias_python(cmd) and event not in seen:
+            seen.add(event)
+            events.append(event)
+    if not events:
+        return []
+    return [{
+        "check": "hookInterpreter",
+        "severity": "warning",
+        "message": (
+            "Hook command(s) invoke bare 'python', which resolves to a Windows App "
+            "Execution Alias (WindowsApps stub), adding seconds of AppX-activation "
+            f"latency per launch. Affected events: {', '.join(events)}. "
+            "Disable the python App Execution Aliases in Windows Settings "
+            "(Apps > Advanced app settings > App execution aliases), or point the "
+            "hook at a full interpreter path."
+        ),
+    }]
+
+
 def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     """Run all static checks; return a list of finding dicts."""
     if config is None:
@@ -880,6 +963,7 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     findings.extend(_check_session_pinning(settings))
     findings.extend(_check_tool_deferral(settings, cwd))
     findings.extend(_summarize_tool_deferral(cwd))
+    findings.extend(_check_hook_interpreters(settings))
 
     return findings
 
@@ -929,6 +1013,9 @@ def main(argv: list[str] | None = None) -> None:
                     print(f"  + [{fix['check']}] {fix['description']}  →  {fix['file']}")
                 for sk in report["skipped"]:
                     print(f"  ~ [{sk['check']}] skipped: {sk['reason']}")
+                if _needs_restart_notice(report["fixes"]):
+                    print("  → NOTE: settings.json/hooks.json changes do not hot-reload; "
+                          "they take effect after the next Claude Code restart.")
                 if not args.apply:
                     print(f"\nStaged to {report_path}")
                     print("Run 'ccgate shape --apply' to apply these fixes.")
@@ -944,6 +1031,9 @@ def main(argv: list[str] | None = None) -> None:
             report_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             delta = updated.get("startup_delta_approx") or 0
             print(f"Fixes applied. Startup overhead reduced by ~{delta:,} tokens (estimated).")
+            if _needs_restart_notice(updated.get("fixes", [])):
+                print("  → NOTE: settings.json/hooks.json changes do not hot-reload; "
+                      "restart Claude Code for them to take effect (they apply next session).")
             if delta < 2000:
                 print("  → Delta under 2,000 tokens. Repo was already lean — verify Phase 2 ROI before building.")
             else:
