@@ -231,3 +231,102 @@ class TestOutputCaps:
         # Phase 0 stub — no session history available
         from ccgate.scripts.shape import _check_output_caps
         assert _check_output_caps(str(tmp_path)) == []
+
+
+class TestHookInterpreters:
+    def _bare(self, cmd):
+        from ccgate.scripts.shape import _command_uses_bare_alias_python
+        return _command_uses_bare_alias_python(cmd)
+
+    def test_bare_python_detected(self):
+        assert self._bare("python -m ccgate.hooks.pre_tool")
+        assert self._bare("python3 -m foo")
+        assert self._bare("pythonw -m foo")
+
+    def test_full_path_python_not_flagged(self):
+        assert not self._bare(
+            r"C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\python.exe -m ccgate.hooks.pre_tool"
+        )
+        assert not self._bare("/c/Users/me/python/python.exe -m foo")
+
+    def test_pythoncore_substring_not_flagged(self):
+        # 'python' inside 'pythoncore-3.14-64' must not match
+        assert not self._bare("pythoncore-3.14-64 -m foo")
+
+    def test_embedded_bare_python_in_pwsh_flagged(self):
+        assert self._bare(
+            'pwsh -NonInteractive -Command "$r=(python -m ccgate.dispatch shape 2>&1|Out-String)"'
+        )
+
+    def test_no_python_not_flagged(self):
+        assert not self._bare("pwsh -NonInteractive -File script.ps1")
+        assert not self._bare("node index.js")
+
+    def test_iter_hook_commands(self):
+        from ccgate.scripts.shape import _iter_hook_commands
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Edit", "hooks": [
+                        {"type": "command", "command": "python -m a"},
+                        {"type": "prompt", "prompt": "ignore me"},
+                    ]},
+                ],
+                "SessionEnd": [
+                    {"hooks": [{"type": "command", "command": "node b.js"}]},
+                ],
+            }
+        }
+        got = sorted(cmd for _, cmd in _iter_hook_commands(settings))
+        assert got == ["node b.js", "python -m a"]
+
+    def test_flags_bare_python_when_alias_present(self, monkeypatch):
+        import ccgate.scripts.shape as shape
+        monkeypatch.setattr(shape, "_resolves_to_windowsapps_alias", lambda i: True)
+        settings = {"hooks": {"PreToolUse": [
+            {"matcher": "Edit", "hooks": [
+                {"type": "command", "command": "python -m ccgate.hooks.pre_tool"},
+            ]},
+        ]}}
+        findings = shape._check_hook_interpreters(settings)
+        assert any(f["check"] == "hookInterpreter" and f["severity"] == "warning"
+                   for f in findings)
+
+    def test_no_finding_when_no_alias_on_machine(self, monkeypatch):
+        import ccgate.scripts.shape as shape
+        monkeypatch.setattr(shape, "_resolves_to_windowsapps_alias", lambda i: False)
+        settings = {"hooks": {"PreToolUse": [
+            {"matcher": "Edit", "hooks": [
+                {"type": "command", "command": "python -m ccgate.hooks.pre_tool"},
+            ]},
+        ]}}
+        assert shape._check_hook_interpreters(settings) == []
+
+    def test_no_finding_for_full_path_hooks(self, monkeypatch):
+        import ccgate.scripts.shape as shape
+        monkeypatch.setattr(shape, "_resolves_to_windowsapps_alias", lambda i: True)
+        settings = {"hooks": {"PreToolUse": [
+            {"matcher": "Edit", "hooks": [
+                {"type": "command",
+                 "command": r"C:\Python\python.exe -m ccgate.hooks.pre_tool"},
+            ]},
+        ]}}
+        assert shape._check_hook_interpreters(settings) == []
+
+
+class TestRestartNotice:
+    def test_settings_json_fix_needs_restart(self):
+        from ccgate.scripts.shape import _needs_restart_notice
+        assert _needs_restart_notice([{"file": "~/.claude/settings.json"}])
+
+    def test_hooks_json_fix_needs_restart(self):
+        from ccgate.scripts.shape import _needs_restart_notice
+        assert _needs_restart_notice([{"file": "/x/.claude/hooks.json"}])
+
+    def test_claudemd_fix_no_restart(self):
+        from ccgate.scripts.shape import _needs_restart_notice
+        assert not _needs_restart_notice([{"file": "CLAUDE.md"}])
+
+    def test_empty_no_restart(self):
+        from ccgate.scripts.shape import _needs_restart_notice
+        assert not _needs_restart_notice([])
