@@ -251,6 +251,42 @@ class TestPreCompactTaskState:
         assert content.count("src/auth.py") == 1
         assert "src/config.py" in content
 
+    def test_parse_todowrite_ignores_prose_mentions(self, tmp_path):
+        """_parse_todowrite false-positive guard: prose/tool_result lines mentioning
+        'TodoWrite' must not overwrite the confirmed todo list."""
+        real_todos = [{"id": "1", "content": "real task", "status": "pending"}]
+        # First entry: genuine tool_use with a real todo list
+        real_entry = _assistant_entry([_tool_use_block("TodoWrite", {"todos": real_todos})])
+        # Second entry: an assistant message that mentions "TodoWrite" in text content
+        # (simulates the model describing the tool it just used — a common false-positive source)
+        prose_entry = {
+            "type": "assistant",
+            "timestamp": "2026-09-23T10:01:00Z",
+            "message": {
+                "model": "claude-test",
+                "content": [{"type": "text", "text": 'I used "TodoWrite" to update the task list.'}],
+                "usage": {"input_tokens": 50, "output_tokens": 5},
+            },
+        }
+        # Third entry: a tool_result echoing the name (another common false-positive source)
+        tool_result_entry = {
+            "type": "user",
+            "timestamp": "2026-09-23T10:01:05Z",
+            "message": {
+                "content": [{"type": "tool_result", "content": "TodoWrite succeeded."}],
+            },
+        }
+        transcript_entries = [real_entry, prose_entry, tool_result_entry]
+        transcript_file = _write_fake_transcript(tmp_path, "c13", transcript_entries)
+        _write_read_cache(tmp_path, "c13", [])
+        env = _base_env(tmp_path)
+        payload = {"session_id": "c13", "transcript_path": str(transcript_file)}
+        r = _run_precompact(payload, env)
+        assert r.returncode == 0
+        content = (tmp_path / "sessions" / "c13.task.md").read_text(encoding="utf-8")
+        # The real task must appear — prose/tool_result mentions must not have cleared it
+        assert "real task" in content, "prose mention of TodoWrite must not discard confirmed todos"
+
 
 def _run_session_start(payload: dict, env: dict) -> subprocess.CompletedProcess:
     return subprocess.run(

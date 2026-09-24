@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from ccgate.config import load_config
 from ccgate.state import acquire_lock, ccgate_home, read_session, write_session
 
-_MARKER = "\n...[truncated]"  # 14 chars; budget = max_chars - len(_MARKER)
+_MARKER = "\n...[truncated]"  # 15 chars; budget = max_chars - len(_MARKER)
 
 
 def _write_startup_findings(session_id: str, findings: list[dict]) -> None:
