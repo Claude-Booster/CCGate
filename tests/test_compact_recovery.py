@@ -250,3 +250,155 @@ class TestPreCompactTaskState:
         # src/auth.py must appear under edited, not duplicated under read-only
         assert content.count("src/auth.py") == 1
         assert "src/config.py" in content
+
+
+def _run_session_start(payload: dict, env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [PYTHON, "-m", "ccgate.hooks.session_start"],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def _write_task_md(tmp_path: Path, session_id: str, content: str) -> Path:
+    p = tmp_path / "sessions" / f"{session_id}.task.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+class TestSessionStartInjection:
+    def test_compact_source_injects_task_md(self, tmp_path):
+        """source: compact → stdout JSON with additionalContext."""
+        _write_task_md(tmp_path, "s1", "active plan: refactor auth")
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s1", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip()
+        data = json.loads(r.stdout)
+        hook_out = data["hookSpecificOutput"]
+        assert hook_out["hookEventName"] == "SessionStart"
+        assert "active plan: refactor auth" in hook_out["additionalContext"]
+
+    def test_resume_source_injects_task_md(self, tmp_path):
+        """source: resume → stdout JSON with additionalContext."""
+        _write_task_md(tmp_path, "s2", "task: fix failing test")
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s2", "source": "resume"}, env)
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert "fix failing test" in data["hookSpecificOutput"]["additionalContext"]
+
+    def test_hook_event_name_literal(self, tmp_path):
+        """hookEventName must be exactly 'SessionStart'."""
+        _write_task_md(tmp_path, "s3", "step 4 of 6")
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s3", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert json.loads(r.stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+    def test_task_md_deleted_before_injection(self, tmp_path):
+        """task.md deleted before print (unlink-first order)."""
+        p = _write_task_md(tmp_path, "s4", "some state")
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s4", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip()
+        assert not p.exists(), "task.md must be deleted (unlink-first)"
+
+    def test_resume_after_compact_does_not_reinject(self, tmp_path):
+        """Second call (resume) after compact deleted task.md → no injection."""
+        _write_task_md(tmp_path, "s5", "state")
+        env = _base_env(tmp_path)
+        r1 = _run_session_start({"session_id": "s5", "source": "compact"}, env)
+        assert r1.returncode == 0
+        assert r1.stdout.strip()
+        r2 = _run_session_start({"session_id": "s5", "source": "resume"}, env)
+        assert r2.returncode == 0
+        assert r2.stdout.strip() == ""
+
+    def test_startup_source_does_not_inject(self, tmp_path):
+        """source: startup → no injection."""
+        _write_task_md(tmp_path, "s6", "should not appear")
+        env = _base_env(tmp_path, {
+            "ENABLE_PROMPT_CACHING_1H": "1",
+            "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
+        })
+        r = _run_session_start({"session_id": "s6", "source": "startup"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip() == ""
+
+    def test_clear_source_does_not_inject(self, tmp_path):
+        """source: clear → no injection."""
+        _write_task_md(tmp_path, "s7", "should not appear")
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s7", "source": "clear"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip() == ""
+
+    def test_missing_task_md_no_crash_no_output(self, tmp_path):
+        """compact source but no task.md → exit 0, empty stdout."""
+        (tmp_path / "sessions").mkdir(parents=True, exist_ok=True)
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s8", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip() == ""
+
+    def test_truncates_within_cap_at_line_boundary(self, tmp_path):
+        """Injected length always <= taskStateMaxTokens*4 chars; ends with marker."""
+        max_chars = 2500 * 4  # 10,000
+        long_content = "\n".join(f"line {i}" for i in range(10000))
+        assert len(long_content) > max_chars
+        _write_task_md(tmp_path, "s9", long_content)
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s9", "source": "compact"}, env)
+        assert r.returncode == 0
+        injected = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert len(injected) <= max_chars, f"Exceeded cap: {len(injected)} > {max_chars}"
+        assert injected.endswith("[truncated]")
+
+    def test_exact_limit_not_truncated(self, tmp_path):
+        """Content == max chars passes through without marker."""
+        max_chars = 2500 * 4
+        line = "y" * 79 + "\n"
+        exact_content = (line * (max_chars // len(line)))[:max_chars]
+        _write_task_md(tmp_path, "s10", exact_content)
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s10", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert not json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"].endswith("[truncated]")
+
+    def test_compact_recovery_disabled_no_injection(self, tmp_path):
+        """compactRecovery=false → no injection."""
+        _write_task_md(tmp_path, "s11", "should not appear")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"compactRecovery": False}), encoding="utf-8"
+        )
+        env = _base_env(tmp_path)
+        r = _run_session_start({"session_id": "s11", "source": "compact"}, env)
+        assert r.returncode == 0
+        assert r.stdout.strip() == ""
+
+    def test_ledger_charged_and_compute_net_picks_it_up(self, tmp_path):
+        """I3: compute_net picks up the charge — asserted by delta, not record existence."""
+        from ccgate.ledger import compute_net
+        content = "active plan: auth refactor\nstep 3 of 6"
+        _write_task_md(tmp_path, "s12", content)
+        _write_session_data(tmp_path, "s12")
+        env = _base_env(tmp_path)
+
+        session_path = tmp_path / "sessions" / "s12.json"
+        net_before = compute_net(json.loads(session_path.read_text(encoding="utf-8")))
+
+        r = _run_session_start({"session_id": "s12", "source": "compact"}, env)
+        assert r.returncode == 0
+        injected_content = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+
+        net_after = compute_net(json.loads(session_path.read_text(encoding="utf-8")))
+        expected_delta = len(injected_content) // 4
+        assert net_after["tokens_injected"] == net_before["tokens_injected"] + expected_delta, (
+            f"compute_net delta wrong: before={net_before['tokens_injected']}, "
+            f"after={net_after['tokens_injected']}, expected delta={expected_delta}"
+        )
