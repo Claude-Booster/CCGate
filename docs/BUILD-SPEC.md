@@ -390,6 +390,8 @@ Each gate is a script that exits 0 or 1. These run in CI on the `ccgate` repo it
 
 G7 is the one most likely to fail first. Python interpreter startup is 30–50 ms before any work happens. Mitigation is in §11.
 
+**Measurability caveat (2026-09-25).** The 30–50 ms startup figure assumes a clean environment. On the reference Windows machine (Intune-managed, OneDrive-synced tree) interpreter startup *alone* is 1.4–5 s with ±1–2 s run-to-run variance — 28–100× the budget — and Defender tuning cannot reduce it (settled negative; see `BUILD-SPEC-phase2.md` §F0.0). G7 therefore cannot be validated here: its p95 is dominated by spawn + startup noise, not the code under test. Treat G7 as requiring a clean CI environment, and anywhere a rule could be justified by either tokens or time, use tokens — server-independent and noise-free relative to timing.
+
 ---
 
 ## 10. Phases
