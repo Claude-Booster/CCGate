@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["sessions", "summary", "misses", "assumptions"],
+  "required": ["sessions", "summary", "misses"],
   "properties": {
     "sessions":   {"type": "array", "items": {"type": "string"}},
     "date_range": {
@@ -13,36 +13,27 @@
     },
     "summary": {
       "type": "object",
-      "required": ["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "avoidable_usd", "total_usd"],
+      "required": ["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens"],
       "properties": {
         "total_requests":    {"type": "integer"},
         "total_misses":      {"type": "integer"},
         "expected_rebuilds": {"type": "integer"},
         "hit_ratio":         {"type": "number"},
-        "avoidable_usd":     {"type": "number"},
-        "total_usd":         {"type": "number"}
+        "cache_read_rate":   {"type": "number"},
+        "tokens":            {"type": "object"}
       }
     },
     "misses": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["cause", "count", "recached_tokens", "cost_usd", "fix"],
+        "required": ["cause", "count", "recached_tokens", "fix"],
         "properties": {
           "cause":           {"type": "string"},
           "count":           {"type": "integer"},
           "recached_tokens": {"type": "integer"},
-          "cost_usd":        {"type": ["number", "null"]},
           "fix":             {"type": "string"}
         }
-      }
-    },
-    "assumptions": {
-      "type": "object",
-      "required": ["turns_remaining_est", "turns_remaining_derivation"],
-      "properties": {
-        "turns_remaining_est":        {"type": "number"},
-        "turns_remaining_derivation": {"type": "string"}
       }
     }
   }

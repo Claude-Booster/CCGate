@@ -18,20 +18,16 @@ SCHEMA_DIR = Path(__file__).parent.parent / "schema"
 
 def _check_report(report: dict) -> list[str]:
     errors = []
-    for key in ("sessions", "summary", "misses", "assumptions"):
+    for key in ("sessions", "summary", "misses"):
         if key not in report:
             errors.append(f"report missing required key '{key}'")
     s = report.get("summary", {})
     for key in ("total_requests", "total_misses", "expected_rebuilds",
-                "hit_ratio", "avoidable_usd", "total_usd"):
+                "hit_ratio", "cache_read_rate", "tokens"):
         if key not in s:
             errors.append(f"summary missing '{key}'")
-    a = report.get("assumptions", {})
-    for key in ("turns_remaining_est", "turns_remaining_derivation"):
-        if key not in a:
-            errors.append(f"assumptions missing '{key}'")
     for m in report.get("misses", []):
-        for key in ("cause", "count", "recached_tokens", "cost_usd", "fix"):
+        for key in ("cause", "count", "recached_tokens", "fix"):
             if key not in m:
                 errors.append(f"miss entry missing '{key}'")
     return errors
