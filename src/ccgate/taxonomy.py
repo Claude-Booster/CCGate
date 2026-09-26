@@ -36,7 +36,7 @@ FIX_HINTS: dict[str, str] = {
     D1_FAST_MODE_TOGGLE:      "avoid toggling fast mode mid-session",
     D1_TTL_EXPIRED:           "/compact before stepping away",
     D1_IMAGE_EVICTION:        "reduce image count per session",
-    D1_UNCLASSIFIED:          "upgrade Claude Code for cause attribution",
+    D1_UNCLASSIFIED:          "cause attribution unavailable here (statusline blocked by policy) — escalate or use the Track B runner",
     D2_COMPACTION:            "expected — no action needed",
     D2_TOOL_RESULT_CLEARING:  "expected — no action needed",
 }
