@@ -129,3 +129,7 @@ def main() -> None:
     config = load_config()
     print(render(payload, config))
     _persist_snapshot(payload)
+
+
+if __name__ == "__main__":
+    main()
