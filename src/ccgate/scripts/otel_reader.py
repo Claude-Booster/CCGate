@@ -14,6 +14,11 @@ from ccgate.state import ccgate_home
 
 _KNOWN_TYPES = frozenset({"input", "output", "cache_read", "cache_creation"})
 
+# Claude Code emits the `type` attribute in camelCase (cacheRead / cacheCreation).
+# Accept both spellings: an unrecognised label silently bucketing to 0 would be a
+# wrong number with no error, which §11 "field drift" forbids.
+_TYPE_ALIASES = {"cacheRead": "cache_read", "cacheCreation": "cache_creation"}
+
 
 def _sanitize_session_id(session_id: str) -> str:
     """Return safe session_id for filename use; fall back to 'unknown' if suspicious."""
@@ -54,7 +59,8 @@ def parse_otlp_payload(payload: dict) -> dict:
                     for attr in dp.get("attributes", []):
                         if attr.get("key") == "type":
                             raw_label = (attr.get("value") or {}).get("stringValue", "unknown")
-                            type_label = raw_label if raw_label in _KNOWN_TYPES else "unknown"
+                            norm = _TYPE_ALIASES.get(raw_label, raw_label)
+                            type_label = norm if norm in _KNOWN_TYPES else "unknown"
                     # Prefer asInt; fall back to asDouble
                     if "asInt" in dp:
                         value = int(dp["asInt"])
