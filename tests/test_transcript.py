@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ccgate.transcript import (
     CapabilityBand, detect_band, encode_cwd,
-    infer_ttl_from_usage, read_transcript,
+    grand_total_input, infer_ttl_from_usage, read_transcript, Usage,
 )
 
 
@@ -142,3 +142,17 @@ class TestInferTtl:
 
     def test_no_tokens_defaults_to_300(self):
         assert infer_ttl_from_usage([self._req()]) == 300
+
+
+def test_grand_total_input_sums_fresh_and_cached():
+    u = Usage(input_tokens=100, cache_read_input_tokens=9000,
+              cache_creation_input_tokens=500, output_tokens=42)
+    assert grand_total_input(u) == 9600
+
+
+def test_grand_total_input_differs_from_input_tokens_alone():
+    # The whole bug class: input_tokens is fresh-only, not the grand total.
+    u = Usage(input_tokens=3, cache_read_input_tokens=15000,
+              cache_creation_input_tokens=0)
+    assert grand_total_input(u) == 15003
+    assert grand_total_input(u) != u.input_tokens
