@@ -23,7 +23,7 @@ def _check_report(report: dict) -> list[str]:
             errors.append(f"report missing required key '{key}'")
     s = report.get("summary", {})
     for key in ("total_requests", "total_misses", "expected_rebuilds",
-                "hit_ratio", "cache_read_rate", "tokens"):
+                "hit_ratio", "cache_read_rate", "tokens", "by_origin"):
         if key not in s:
             errors.append(f"summary missing '{key}'")
     for m in report.get("misses", []):

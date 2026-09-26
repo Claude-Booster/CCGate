@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ccgate import taxonomy
 from ccgate.config import DEFAULTS
-from ccgate.scripts.miss_audit import attribute_miss, run_audit
+from ccgate.scripts.miss_audit import attribute_miss, is_subagent_transcript, run_audit
 from ccgate.transcript import Request, Usage, classify_requests
 
 FIXTURES = Path(__file__).parent / "fixtures" / "transcripts"
@@ -113,3 +113,56 @@ class TestRunAudit:
         causes = {m["cause"] for m in report["misses"]}
         assert taxonomy.D2_COMPACTION in causes
         assert taxonomy.D2_COMPACTION not in taxonomy.D1_ALL
+
+
+def test_is_subagent_transcript_detects_subagents_dir(tmp_path):
+    main = tmp_path / "session.jsonl"
+    sub = tmp_path / "subagents" / "agent-abc123.jsonl"
+    sub.parent.mkdir(parents=True)
+    assert is_subagent_transcript(sub) is True
+    assert is_subagent_transcript(main) is False
+
+
+class TestByOrigin:
+    def test_by_origin_always_has_both_buckets(self):
+        report = run_audit([FIXTURES / "clean_15req.jsonl"], DEFAULTS)
+        bo = report["summary"]["by_origin"]
+        assert set(bo) == {"main", "subagent"}
+        assert set(bo["main"]) == {"requests", "misses"}
+        assert set(bo["subagent"]) == {"requests", "misses"}
+        # clean_15req is a main-thread fixture: all requests in main bucket
+        assert bo["subagent"]["requests"] == 0
+        assert bo["main"]["requests"] == report["summary"]["total_requests"]
+
+    def test_main_and_subagent_misses_sum_to_total(self):
+        report = run_audit([FIXTURES / "d1_model_switch.jsonl"], DEFAULTS)
+        bo = report["summary"]["by_origin"]
+        assert bo["main"]["misses"] + bo["subagent"]["misses"] == \
+            report["summary"]["total_misses"]
+
+    def test_subagent_misses_land_in_subagent_bucket(self, tmp_path):
+        # THE defect this task fixes: subagent cold-start misses were counted as
+        # avoidable main-thread waste. Build a real transcript under a subagents/
+        # dir with a genuine miss (turn 2 re-processes 5000 tokens) and run it
+        # through run_audit — its miss must land in the subagent bucket, not main.
+        import json
+        sub = tmp_path / "sess-uuid" / "subagents" / "agent-deadbeef.jsonl"
+        sub.parent.mkdir(parents=True)
+        lines = [
+            {"type": "assistant", "timestamp": "2026-09-26T10:00:00.000Z",
+             "message": {"model": "claude-sonnet-5", "usage": {
+                 "input_tokens": 5000, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5000,
+                 "cache_creation": {"ephemeral_1h_input_tokens": 5000}}}},
+            {"type": "assistant", "timestamp": "2026-09-26T10:00:05.000Z",
+             "message": {"model": "claude-sonnet-5", "usage": {
+                 "input_tokens": 5000, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5000,
+                 "cache_creation": {"ephemeral_1h_input_tokens": 5000}}}},
+        ]
+        sub.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+        report = run_audit([sub], DEFAULTS)
+        bo = report["summary"]["by_origin"]
+        assert report["summary"]["total_misses"] >= 1
+        assert bo["subagent"]["misses"] == report["summary"]["total_misses"]
+        assert bo["main"]["misses"] == 0

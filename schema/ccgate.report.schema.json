@@ -13,14 +13,15 @@
     },
     "summary": {
       "type": "object",
-      "required": ["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens"],
+      "required": ["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens", "by_origin"],
       "properties": {
         "total_requests":    {"type": "integer"},
         "total_misses":      {"type": "integer"},
         "expected_rebuilds": {"type": "integer"},
         "hit_ratio":         {"type": "number"},
         "cache_read_rate":   {"type": "number"},
-        "tokens":            {"type": "object"}
+        "tokens":            {"type": "object"},
+        "by_origin":         {"type": "object"}
       }
     },
     "misses": {
