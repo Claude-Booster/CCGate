@@ -853,7 +853,7 @@ def apply_fixes(report: dict) -> dict:
     return {
         **report,
         "applied": True,
-        "applied_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "applied_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "startup_chars_before": chars_before,
         "startup_chars_after": chars_after,
         "startup_tokens_before_approx": tokens_before,

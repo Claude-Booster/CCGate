@@ -1,4 +1,6 @@
 import json
+import re
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -245,3 +247,13 @@ class TestApplyFixes:
         assert "\\" not in report["cwd"]
         for fix in report["fixes"]:
             assert "\\" not in fix["file"]
+
+    def test_applied_at_has_no_deprecation_and_valid_format(self, tmp_path):
+        """applied_at has valid format and is produced without DeprecationWarning."""
+        with patch("ccgate.scripts.shape.Path.home", return_value=tmp_path):
+            staged = stage_fixes(cwd=str(tmp_path))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            with patch("ccgate.scripts.shape.Path.home", return_value=tmp_path):
+                applied = apply_fixes(staged)
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", applied["applied_at"])
