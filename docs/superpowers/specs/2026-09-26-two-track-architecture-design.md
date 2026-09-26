@@ -78,12 +78,29 @@ that require interception, and hosts Phase 2 enforcement (F1–F3):
   at task boundaries: it can *choose* the model, not merely veto a switch. Port the A2
   pricing logic (`IMPL-SPEC-automation.md` §A2 steps 1–7 verbatim, including step 6:
   never block/​downgrade a capability upgrade); drop the `PreModelSwitch` delivery.
-- **A4 — compaction recovery.** *Relocated and upgraded.* Port `_extract_from_transcript`
-  (`pre_compact.py:40`, hardened, still valid) unchanged. In the owned loop, ccgate
-  calls `_extract` at a chosen compaction boundary and hands the result **directly to
-  `/compact` as instructions**, rather than writing `sessions/<id>.task.md` to disk and
-  depending on `SessionStart` re-injection that can no longer fire. Same extraction,
-  better delivery.
+- **A4 — compaction recovery.** *Relocated.* Port `_extract_from_transcript`
+  (`pre_compact.py:40`, hardened, still valid) unchanged — the extraction logic is not
+  in question. The **delivery** is the open risk. Two findings:
+  - **Server-side compaction is not available in this SDK.** `claude-agent-sdk` 0.2.128
+    exposes no `compact_20260112` beta and no compaction-instruction parameter — only
+    `/compact` as a slash command and the `PreCompact` hook. The original spec's
+    `sdkCompactStrategy: "server"` default (`IMPL-SPEC-automation.md` §3) is therefore
+    **unreachable** on this SDK version. Revisit if a later SDK adds it.
+  - **`/compact <instructions>` delivery — VERIFIED 2026-09-26 (§12.9, red→green).** A4's
+    Track B delivery calls `_extract` at a boundary and passes the result to `/compact`
+    as instructions. Verified by ground-truth transcript observation: a `/compact`
+    carrying an instruction to begin the summary with a distinctive marker token produced
+    a post-compaction summary that **began with that exact token** and preserved the
+    instructed file path (marker×3, path×7 in the transcript; real compaction,
+    `pre_tokens 17686 → post_tokens 1762`). An effect that cannot occur by default, so the
+    instructions demonstrably reach the summarizer.
+  - **Observability for Track B.** The compaction result surfaces as a `SystemMessage`
+    subtype `compact_boundary` (carrying `compact_metadata`: pre/post tokens, dropped,
+    duration) followed by a `UserMessage` whose content *is* the summary. The
+    `ResultMessage` for a `/compact` turn is empty — do not read the summary from it.
+    Track B reads the `compact_boundary` message (or the on-disk transcript entry of the
+    same name) to confirm compaction and to ledger `tokens_measured` from the pre/post
+    delta.
 - **A5 — compaction economics.** The break-even rule (`IMPL-SPEC-automation.md` §A5)
   moves here from `statusline.py` (blocked). The loop can *act* on the break-even
   signal (trigger `/compact` when `projected_savings > recache_cost`), not just advise.
@@ -97,19 +114,42 @@ a tool in `allowed_tools` auto-approves it *before* `can_use_tool`; settings-fil
 rules shadow `can_use_tool` invisibly. Track B must pass `setting_sources=[]` and gate
 via a `PreToolUse` hook, not `can_use_tool`, whenever it must see every call.
 
-## 4. What Track B costs — stated plainly
+## 4. What interactive keeps and loses — in prevention-model terms
 
-Enforcement applies **only to work done inside ccgate's owned loop** (`ccgate run`).
-Your interactive Claude Code sessions — the ones you spend the day in — get **config
-remediation (A1/A3) and post-hoc auditing (Track A), nothing more.** No tool-call
-denial, no model redirection, no compaction action in those sessions. That is the real
-trade the org policy imposed. The two-track structure must not be read to imply full
-coverage of interactive work; it does not, and cannot, while the policy stands.
+The right frame is the prevention model from `IMPL-SPEC-automation.md` §0.1/§1:
+automation means **removing the possibility** of a defect, in one of three ways —
+**ELIMINATE** (config, zero runtime cost), **PREVENT** (interception denies the
+action), **RECOVER** (the defect is unavoidable; make it cheap). The org policy cuts
+cleanly along that taxonomy.
 
-This is a genuine scope reduction versus the original all-in-the-surface vision, and
-the README and reports must say so rather than let the architecture imply otherwise.
+**Interactive sessions keep ELIMINATE — in full.** ELIMINATE is config; config is not
+a settings-*derived execution channel*, so the policy does not touch it. Every daily
+session still gets:
 
-## 5. Ledger re-baseline (ground truth)
+| Driver | Eliminated by | Channel |
+|---|---|---|
+| `D1.ttl_expired` | `ENABLE_PROMPT_CACHING_1H` + `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h` | config |
+| `D1.tools_changed` | tool deferral; lint `alwaysLoad` out of `.mcp.json` (A3) | config |
+| D4 startup overhead | `claudeMdExcludes`, deny rules | config |
+
+That is **three of the four D1 drivers, automatic, every interactive session, with no
+execution channel required.** This is not "auditing, nothing more" — it is real,
+compounding, always-on savings that the policy cannot reach.
+
+**Interactive sessions lose PREVENT and RECOVER.** Both need an execution channel the
+policy blocks:
+
+- **PREVENT** — `D1.model_switch` (was the `PreModelSwitch` guard). No interception in
+  interactive → relocates to Track B (§3).
+- **RECOVER** — `D1.compaction` timing (was `PreCompact`/`SessionStart`). No
+  compaction action in interactive → relocates to Track B (§3).
+
+So the honest one-line statement of the trade: **interactive keeps ELIMINATE; PREVENT
+and RECOVER move to the owned loop and apply only to `ccgate run` work.** The README
+and reports must state it in exactly these terms — it is both more accurate and more
+actionable than implying either full coverage or mere auditing.
+
+## 5. Ledger re-baseline (ground truth) and the I7 boundary
 
 `chars // 4` was a workaround for hooks not seeing `usage` blocks. Track A reads them
 directly, satisfying I4 properly for the first time. Consequently:
@@ -118,11 +158,25 @@ directly, satisfying I4 properly for the first time. Consequently:
   `cache_read_input_tokens`, `cache_creation_input_tokens`, `output_tokens`, and the
   `ephemeral_1h`/`ephemeral_5m` split for real TTL.
 - **Any net figure computed earlier in this project was derived from estimates and is
-  discarded, not carried forward.** The first Track A run establishes the true
-  baseline. Per I3, net stays net-of-ccgate's-own-injected-tokens; in Track A that
-  injection is zero (read-only), so Track A net = gross savings observed.
+  discarded, not carried forward.** The first baseline capture (§7) establishes the
+  true numbers.
 - The character-count path remains only as the I4 labelled fallback, `~`-prefixed
   wherever surfaced.
+
+**I7 boundary — Track A itself alters no behaviour, so it claims no savings of its
+own.** Use the three ledger categories from `IMPL-SPEC-automation.md` §4, reported
+separately (collapsing them is a G24 violation):
+
+| Category | Who earns it | Track A's role |
+|---|---|---|
+| `tokens_prevented` | config remediation A1/A3 (ELIMINATE) | **reports** it — counterfactual, baseline vs post-fix startup cost, `~`-prefixed with baseline in `assumptions` |
+| `tokens_avoided` | runtime denials A2/F1–F3 (Track B only) | **reports zero** — Track A denies nothing |
+| `tokens_measured` | server-side compaction (Track B only) | **reports zero** — Track A measures no server delta |
+
+Track A is a reporter, not an actor. The `tokens_prevented` it surfaces is earned by
+the config remediation, not by Track A; I7 is satisfied because Track A never attributes
+a saving to itself. `tokens_injected` is subtracted from all three; per I3 a negative
+net says so in the headline.
 
 ## 6. Component disposition (reconciliation table)
 
@@ -140,15 +194,35 @@ Dead code to remove or repurpose: the `session_start` A1 assertion hook, and the
 `PreCompact`/`SessionStart` A4 hook wiring (the *logic* in `_extract_from_transcript`
 is retained and ported).
 
-## 7. A1/A3 ship now, independent of both tracks
+## 7. A1/A3 ship now — but baseline must come first
 
 A1 (config pin) and A3 (tool deferral) are pure config remediation via `shape --fix`,
 need no execution channel, and are where the compounding savings are (A3's
 `ENABLE_TOOL_SEARCH` check alone avoids 100K+ tokens of tool definitions per
-MCP-heavy session). They are already implemented (53 config tests pass). Remaining
-work is small: drop A1's dead assertion hook, fix the `datetime.utcnow()` deprecation
-in `shape.py:856`, and confirm the remediation is applied to the live settings. This
-does not wait for either track's plan.
+MCP-heavy session). Already implemented (53 config tests pass). This does not wait for
+either track's plan — **but it has a hard ordering constraint.**
+
+**Capture the baseline before remediating.** `tokens_prevented` is counterfactual — it
+needs a *before*. `miss_audit` already reads existing transcripts, so the baseline is a
+**today task, not a Track A deliverable**: run `miss_audit` over current transcripts and
+record the pre-remediation startup cost and D1 driver frequencies. If A1/A3 remediation
+lands first, what they saved becomes unmeasurable forever.
+
+**Then verify the remediation actually took effect — per §12.9, do not assume it.** The
+policy has already silently killed two settings-derived channels; assuming the settings
+`env` block survives is the exact inference pattern §12.9 forbids. It is red→green
+testable without `statusLine`: in the transcript `usage` blocks, compare
+`cache_creation.ephemeral_5m_input_tokens` vs `ephemeral_1h_input_tokens` before and
+after remediation. If it stays 5m, A1's cache pin is **inert** and nothing else would
+ever reveal it. A1 counts as working only once a session shows the 1h bucket populated.
+
+Ordered steps (all pre-Track-A):
+
+1. Baseline: `miss_audit` over existing transcripts → record startup cost + D1 freqs.
+2. Apply A1/A3 remediation (`shape --fix`).
+3. Verify: transcript shows `ephemeral_1h_input_tokens` populated (not 5m). Red→green.
+4. Cleanup: drop A1's dead `session_start` assertion hook; fix the
+   `datetime.utcnow()` deprecation at `shape.py:856`.
 
 ## 8. What remains impossible (preserved from IMPL-SPEC §7)
 
@@ -172,13 +246,29 @@ G-gate that asserts a channel works — Track B's `PreToolUse` enforcement gate 
 since a silently-shadowed callback looks identical to a working one until you force a
 denial and watch it hold.
 
-## 10. Open questions for the plan phase
+## 10. Resolved decisions (were open questions)
 
-- Track B UX: how does the user launch `ccgate run`, and how does its output surface
-  relate to a normal session transcript?
-- Whether A5's *acting* (auto-triggering `/compact`) ships on or off by default, given
-  the original A5 was advisory-only and blocking auto-compact risks a hard
-  context-limit failure (`IMPL-SPEC-automation.md` §A5).
-- Sequencing: Track A (measurement + re-baseline) almost certainly ships before Track B,
-  so the baseline exists to judge Track B's A/B — mirroring the original
-  "measure before enforce" ordering.
+- **Track B UX.** `ccgate run --task <file>`, streaming stdout, writes its own session
+  record. It does **not** mimic an interactive session — it isn't one, and blurring that
+  would confuse which sessions actually had enforcement. Its session records are
+  distinguishable from interactive transcripts by construction.
+- **A5 auto-acting — off by default.** Ship A5 *logging* the break-even decision without
+  acting, compare its decisions against what native auto-compact actually did, then
+  enable acting only on that evidence. Blocking auto-compact with no replacement risks a
+  hard context-limit failure, and §12.9 forbids claiming it works before watching it
+  fail first.
+- **Sequencing (whole project).** baseline (today, existing transcripts) → A1/A3
+  remediation → verify the `env` block took effect (§7 step 3) → Track A → Track B. This
+  preserves the counterfactual baseline and mirrors the original "measure before enforce"
+  order.
+
+## 11. Plan split
+
+Two plans, per the sequencing above:
+
+- **Plan 1 — "A1/A3 finish + baseline + dead-hook cleanup."** Small, separable, and it
+  unblocks the baseline work. Contains: baseline capture, remediation verification (§7),
+  A1 assertion-hook removal, A4/`session_start` dead-hook removal (logic ported later),
+  the `datetime.utcnow()` fix. Ships first.
+- **Plan 2 — "Track A + Track B."** The measurement re-baseline and the owned loop. A
+  different size; must not be held up by Plan 1.
