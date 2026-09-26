@@ -14,3 +14,10 @@ def test_d2_never_in_d1_all():
 def test_every_d1_has_a_fix_hint():
     for code in taxonomy.D1_ALL:
         assert code in taxonomy.FIX_HINTS, f"No fix hint for {code}"
+
+def test_unclassified_hint_names_the_policy_block():
+    hint = taxonomy.FIX_HINTS[taxonomy.D1_UNCLASSIFIED].lower()
+    # not just the absence of one word — pin the actual claim
+    assert "upgrade" not in hint
+    assert "attribution" in hint
+    assert "statusline" in hint  # names why attribution is unavailable here
