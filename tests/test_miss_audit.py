@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ccgate import taxonomy
 from ccgate.config import DEFAULTS
-from ccgate.scripts.miss_audit import attribute_miss, run_audit, _turns_remaining_est
+from ccgate.scripts.miss_audit import attribute_miss, run_audit
 from ccgate.transcript import Request, Usage, classify_requests
 
 FIXTURES = Path(__file__).parent / "fixtures" / "transcripts"
@@ -79,64 +79,37 @@ class TestRunAudit:
                      and m["cause"] != taxonomy.D1_UNCLASSIFIED]
         assert sum(m["count"] for m in avoidable) == 0
 
-    def test_report_schema_fields_present(self):
+    def test_report_has_raw_tokens_and_no_dollars_or_turns(self):
         report = run_audit([FIXTURES / "clean_15req.jsonl"], DEFAULTS)
-        assert "sessions" in report
-        assert "summary" in report
-        assert "misses" in report
-        assert "assumptions" in report
-        assert "turns_remaining_est" in report["assumptions"]
-        assert "turns_remaining_derivation" in report["assumptions"]
+        s = report["summary"]
+        # dollar/turns layer is gone
+        assert "total_usd" not in s
+        assert "avoidable_usd" not in s
+        assert "assumptions" not in report
+        # raw tokens present and non-negative (by-construction bound)
+        assert set(s["tokens"]) == {
+            "grand_total_input", "cache_read", "cache_creation", "input", "output"
+        }
+        assert all(v >= 0 for v in s["tokens"].values())
+        assert 0.0 <= s["cache_read_rate"] <= 1.0
+        assert 0.0 <= s["hit_ratio"] <= 1.0
+        for m in report["misses"]:
+            assert "cost_usd" not in m
 
-    def test_d2_compaction_not_in_avoidable_total(self):
+    def test_empty_paths_all_zero_no_crash(self):
+        # Also the zero-cache guard: with no requests, cache_read + cache_creation == 0,
+        # so cache_read_rate must be 0.0, not a ZeroDivisionError.
+        report = run_audit([], DEFAULTS)
+        s = report["summary"]
+        assert s["total_requests"] == 0
+        assert s["hit_ratio"] == 1.0
+        assert s["tokens"]["grand_total_input"] == 0
+        assert s["cache_read_rate"] == 0.0
+
+    def test_d2_compaction_present_but_not_in_avoidable_d1(self):
+        # Replaces the old dollar-based test: D2.compaction is detected and listed,
+        # but is not one of the avoidable D1 causes.
         report = run_audit([FIXTURES / "d2_compaction.jsonl"], DEFAULTS)
-        # D2.compaction must appear in the misses list (we detected it)
-        d2_entries = [m for m in report["misses"] if m["cause"] == taxonomy.D2_COMPACTION]
-        assert d2_entries, "D2.compaction should appear in misses list"
-        # Its cost must NOT be included in avoidable_usd
-        d1_cost = sum(
-            m["cost_usd"] or 0 for m in report["misses"]
-            if m["cause"] in taxonomy.D1_ALL
-        )
-        assert abs(report["summary"]["avoidable_usd"] - d1_cost) < 1e-9
-        # Sanity: D2 cost itself should be zero (expected rebuild, not charged as avoidable)
-        assert report["summary"]["avoidable_usd"] == d1_cost
-
-
-class TestTurnsRemainingEst:
-    def _make_requests(self, token_counts):
-        return [
-            _req(i, "claude-sonnet-5", toks, 0, toks, h1=toks)
-            for i, toks in enumerate(token_counts)
-        ]
-
-    def test_first_three_turns_bootstrap(self):
-        reqs = self._make_requests([1000, 2000, 3000])
-        for i in range(3):
-            est, derivation = _turns_remaining_est(reqs, i)
-            assert est == 5.0
-            assert "bootstrap" in derivation.lower()
-
-    def test_after_three_turns_uses_median_not_mean(self):
-        # Tokens: [1000, 1000, 1000, 9000] — mean = 3000, median = 1000
-        # With median=1000 and DEFAULT_WINDOW_TOKENS=200_000:
-        # used = 12000, remaining = 188000, est = 188000/1000 = 188.0
-        from ccgate.model import DEFAULT_WINDOW_TOKENS
-        reqs = self._make_requests([1000, 1000, 1000, 9000])
-        est, derivation = _turns_remaining_est(reqs, 3)
-        total = sum(r.usage.input_tokens for r in reqs)
-        median_tpt = 1000.0  # median([1000,1000,1000,9000])
-        expected = round((DEFAULT_WINDOW_TOKENS - total) / median_tpt, 1)
-        assert est == expected
-        assert "median" in derivation.lower()
-
-    def test_derivation_mentions_turn_count(self):
-        reqs = self._make_requests([5000] * 5)
-        _, derivation = _turns_remaining_est(reqs, 4)
-        assert "5" in derivation  # 5 turns observed
-
-    def test_zero_median_falls_back_to_bootstrap(self):
-        reqs = self._make_requests([0, 0, 0, 0])
-        est, derivation = _turns_remaining_est(reqs, 3)
-        assert est == 5.0
-        assert "bootstrap" in derivation.lower()
+        causes = {m["cause"] for m in report["misses"]}
+        assert taxonomy.D2_COMPACTION in causes
+        assert taxonomy.D2_COMPACTION not in taxonomy.D1_ALL

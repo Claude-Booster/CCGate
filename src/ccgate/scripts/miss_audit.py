@@ -10,11 +10,11 @@ from collections import defaultdict
 from pathlib import Path
 
 from ccgate import taxonomy
-from ccgate.model import get_model_spec
 from ccgate.transcript import (
     Classification,
     Request,
     classify_requests,
+    grand_total_input,
     infer_ttl_from_usage,
     read_transcript,
 )
@@ -39,48 +39,18 @@ def attribute_miss(curr: Request, prev: Request | None, ttl: int) -> str:
     return taxonomy.D1_UNCLASSIFIED
 
 
-def _turns_remaining_est(requests: list[Request], index: int) -> tuple[float, str]:
-    """Estimate remaining turns via rolling median of per-turn input token counts (§6).
-
-    Bootstrap constant 5 for the first 3 turns. After that, uses statistics.median
-    of all observed per-turn input_tokens to estimate remaining window capacity.
-    """
-    import statistics
-    from ccgate.model import DEFAULT_WINDOW_TOKENS
-
-    if index < 3:
-        return 5.0, f"bootstrap constant (turn {index + 1} of session)"
-
-    per_turn_tokens = [r.usage.input_tokens for r in requests[: index + 1]]
-    median_tpt = statistics.median(per_turn_tokens)
-
-    if median_tpt <= 0:
-        return 5.0, "bootstrap constant (zero median token count)"
-
-    total_tokens = sum(per_turn_tokens)
-    tokens_remaining = max(0, DEFAULT_WINDOW_TOKENS - total_tokens)
-    est = tokens_remaining / median_tpt
-    return (
-        round(est, 1),
-        f"window remaining / rolling median {median_tpt:.0f} tok/turn "
-        f"({index + 1} turns observed)",
-    )
-
-
 def run_audit(paths: list[Path], config: dict) -> dict:
     """Run miss audit over a list of transcript paths; return report dict."""
     all_sessions: list[str] = []
     cause_counts: dict[str, int] = defaultdict(int)
     cause_tokens: dict[str, int] = defaultdict(int)
-    cause_cost:   dict[str, float] = defaultdict(float)
 
     total_requests = 0
     total_misses = 0
     total_rebuilds = 0
-    total_usd = 0.0
-    avoidable_usd = 0.0
 
-    turns_est, turns_derivation = 5.0, "bootstrap constant"
+    tokens = {"grand_total_input": 0, "cache_read": 0,
+              "cache_creation": 0, "input": 0, "output": 0}
 
     for path in sorted(paths):
         all_sessions.append(str(path))
@@ -95,13 +65,12 @@ def run_audit(paths: list[Path], config: dict) -> dict:
         expected_cache = 0
 
         for req, cls in classified:
-            spec = get_model_spec(req.model_id)
-            total_usd += (
-                req.usage.cache_creation_input_tokens * spec.rate_in * spec.write_multiplier
-                + req.usage.cache_read_input_tokens   * spec.rate_in * spec.read_multiplier
-                + (req.usage.input_tokens - req.usage.cache_read_input_tokens
-                   - req.usage.cache_creation_input_tokens) * spec.rate_in
-            )
+            u = req.usage
+            tokens["grand_total_input"] += grand_total_input(u)
+            tokens["cache_read"]        += u.cache_read_input_tokens
+            tokens["cache_creation"]    += u.cache_creation_input_tokens
+            tokens["input"]             += u.input_tokens
+            tokens["output"]            += u.output_tokens
 
             if cls == Classification.EXPECTED_REBUILD:
                 total_rebuilds += 1
@@ -116,20 +85,12 @@ def run_audit(paths: list[Path], config: dict) -> dict:
                 cause = attribute_miss(req, prev_req, ttl)
                 cause_counts[cause] += 1
                 cause_tokens[cause] += re_processed
-                miss_cost = (
-                    re_processed * spec.rate_in * spec.write_multiplier
-                    - re_processed * spec.rate_in * spec.read_multiplier
-                )
-                cause_cost[cause] += miss_cost
-                if cause in taxonomy.D1_ALL:
-                    avoidable_usd += miss_cost
                 expected_cache = req.usage.cache_creation_input_tokens
 
             else:  # HIT
                 expected_cache = (req.usage.cache_read_input_tokens
                                   + req.usage.cache_creation_input_tokens)
 
-            turns_est, turns_derivation = _turns_remaining_est(requests, req.index)
             total_requests += 1
             prev_req = req
 
@@ -137,19 +98,18 @@ def run_audit(paths: list[Path], config: dict) -> dict:
         (total_requests - total_misses) / total_requests if total_requests > 0 else 1.0
     )
 
+    denom = tokens["cache_read"] + tokens["cache_creation"]
+    cache_read_rate = (tokens["cache_read"] / denom) if denom > 0 else 0.0
+
     misses_list = []
     for cause in sorted(cause_counts.keys()):
-        count = cause_counts[cause]
-        tokens = cause_tokens[cause]
-        cost = cause_cost.get(cause)
         misses_list.append({
             "cause":           cause,
-            "count":           count,
-            "recached_tokens": tokens,
-            "cost_usd":        round(cost, 6) if cost else None,
+            "count":           cause_counts[cause],
+            "recached_tokens": cause_tokens[cause],
             "fix":             taxonomy.FIX_HINTS.get(cause, ""),
         })
-    misses_list.sort(key=lambda m: (-(m["cost_usd"] or 0), m["cause"]))
+    misses_list.sort(key=lambda m: (-m["count"], m["cause"]))
 
     return {
         "sessions": all_sessions,
@@ -158,14 +118,10 @@ def run_audit(paths: list[Path], config: dict) -> dict:
             "total_misses":      total_misses,
             "expected_rebuilds": total_rebuilds,
             "hit_ratio":         round(hit_ratio, 6),
-            "avoidable_usd":     round(avoidable_usd, 6),
-            "total_usd":         round(total_usd, 6),
+            "cache_read_rate":   round(cache_read_rate, 6),
+            "tokens":            tokens,
         },
         "misses": misses_list,
-        "assumptions": {
-            "turns_remaining_est":        turns_est,
-            "turns_remaining_derivation": turns_derivation,
-        },
     }
 
 
@@ -174,24 +130,20 @@ def _render_table(report: dict) -> str:
     s = report["summary"]
     session_count = len(report["sessions"])
     lines.append(f"\nMISS AUDIT — {session_count} session(s)\n")
-    lines.append(f"  {'cause':<30} {'misses':>6}  {'re-cached':>10}  {'cost':>8}  fix")
-    lines.append("  " + "-" * 70)
+    lines.append(f"  {'cause':<30} {'misses':>6}  {'re-cached':>10}  fix")
+    lines.append("  " + "-" * 60)
     for m in report["misses"]:
         tokens = m["recached_tokens"]
         tok_str = f"{tokens/1e6:.1f}M" if tokens >= 1e6 else f"{tokens/1e3:.0f}K"
-        cost_str = f"${m['cost_usd']:.2f}" if m["cost_usd"] else "—"
-        lines.append(
-            f"  {m['cause']:<30} {m['count']:>6}  {tok_str:>10}  {cost_str:>8}  {m['fix']}"
-        )
+        lines.append(f"  {m['cause']:<30} {m['count']:>6}  {tok_str:>10}  {m['fix']}")
     lines.append("")
-    if s["total_usd"] > 0:
-        pct = s["avoidable_usd"] / s["total_usd"] * 100
-        lines.append(
-            f"  avoidable: ${s['avoidable_usd']:.2f} of ${s['total_usd']:.2f} session spend"
-            f" ({pct:.0f}%)"
-        )
-    else:
-        lines.append("  no spend recorded")
+    t = s["tokens"]
+    lines.append(
+        f"  cache-read rate: {s['cache_read_rate']*100:.1f}%  "
+        f"(read {t['cache_read']/1e6:.0f}M / created {t['cache_creation']/1e6:.0f}M)"
+    )
+    lines.append(f"  hit ratio: {s['hit_ratio']*100:.1f}%  "
+                 f"({s['total_misses']} misses / {s['total_requests']} requests)")
     return "\n".join(lines)
 
 
@@ -260,11 +212,6 @@ def main(argv: list[str] | None = None) -> None:
         if g5_count > 0:
             failures.append(
                 f"G5 FAIL: {g5_count} miss(es) of type D1.model_switch or D1.tools_changed"
-            )
-        # existing gate: any avoidable spend
-        if s["avoidable_usd"] > 0:
-            failures.append(
-                f"avoidable: ${s['avoidable_usd']:.4f} of ${s['total_usd']:.4f} session spend"
             )
         if failures:
             for msg in failures:
