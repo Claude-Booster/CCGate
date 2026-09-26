@@ -44,6 +44,20 @@ class Usage:
     ephemeral_5m_input_tokens: int = 0
 
 
+def grand_total_input(u: Usage) -> int:
+    """Total input tokens processed for a request.
+
+    input_tokens in a usage block is the fresh, uncached count only; the grand
+    total is fresh + cache_read + cache_creation. Defining it once here keeps the
+    "input_tokens is the total" misconception from reappearing at a call site.
+    """
+    return (
+        u.input_tokens
+        + u.cache_read_input_tokens
+        + u.cache_creation_input_tokens
+    )
+
+
 @dataclass
 class Request:
     index: int
