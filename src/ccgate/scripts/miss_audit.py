@@ -20,6 +20,15 @@ from ccgate.transcript import (
 )
 
 
+def is_subagent_transcript(path: Path) -> bool:
+    """True if this JSONL is a subagent transcript (lives under a 'subagents' dir).
+
+    Subagents get a fresh cache by design, so their first request is always a
+    miss — isolation working, not waste. Bucket them separately.
+    """
+    return "subagents" in Path(path).parts
+
+
 def attribute_miss(curr: Request, prev: Request | None, ttl: int) -> str:
     """Return the most likely D1 code for a miss, using transcript-only signals."""
     if prev is not None and prev.model_id != curr.model_id:
@@ -52,12 +61,18 @@ def run_audit(paths: list[Path], config: dict) -> dict:
     tokens = {"grand_total_input": 0, "cache_read": 0,
               "cache_creation": 0, "input": 0, "output": 0}
 
+    by_origin: dict[str, dict[str, int]] = {
+        "main":     {"requests": 0, "misses": 0},
+        "subagent": {"requests": 0, "misses": 0},
+    }
+
     for path in sorted(paths):
         all_sessions.append(str(path))
         requests = read_transcript(path)
         if not requests:
             continue
 
+        origin = "subagent" if is_subagent_transcript(path) else "main"
         ttl = infer_ttl_from_usage(requests)
         classified = classify_requests(requests, transcript_path=path)
 
@@ -81,6 +96,7 @@ def run_audit(paths: list[Path], config: dict) -> dict:
 
             elif cls == Classification.MISS:
                 total_misses += 1
+                by_origin[origin]["misses"] += 1
                 re_processed = max(0, expected_cache - req.usage.cache_read_input_tokens)
                 cause = attribute_miss(req, prev_req, ttl)
                 cause_counts[cause] += 1
@@ -92,6 +108,7 @@ def run_audit(paths: list[Path], config: dict) -> dict:
                                   + req.usage.cache_creation_input_tokens)
 
             total_requests += 1
+            by_origin[origin]["requests"] += 1
             prev_req = req
 
     hit_ratio = (
@@ -120,6 +137,7 @@ def run_audit(paths: list[Path], config: dict) -> dict:
             "hit_ratio":         round(hit_ratio, 6),
             "cache_read_rate":   round(cache_read_rate, 6),
             "tokens":            tokens,
+            "by_origin":         by_origin,
         },
         "misses": misses_list,
     }
