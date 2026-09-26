@@ -216,13 +216,23 @@ testable without `statusLine`: in the transcript `usage` blocks, compare
 after remediation. If it stays 5m, A1's cache pin is **inert** and nothing else would
 ever reveal it. A1 counts as working only once a session shows the 1h bucket populated.
 
-Ordered steps (all pre-Track-A):
+**Baseline captured 2026-09-26** (`docs/baseline-2026-09-26.md`), before any
+`shape --fix`. Outcome reshaped the sequence:
 
-1. Baseline: `miss_audit` over existing transcripts → record startup cost + D1 freqs.
-2. Apply A1/A3 remediation (`shape --fix`).
-3. Verify: transcript shows `ephemeral_1h_input_tokens` populated (not 5m). Red→green.
-4. Cleanup: drop A1's dead `session_start` assertion hook; fix the
-   `datetime.utcnow()` deprecation at `shape.py:856`.
+- **A1 is already applied** — the pin keys are in settings and 258.8M `ephemeral_1h`
+  tokens confirm they work. No A1 remediation remains; only dead-hook cleanup.
+- **A3's driver is absent** — zero `D1.tools_changed` in 114,536 requests. No
+  remediation needed on this machine.
+- **`miss_audit`'s cost path is broken**, so the cost baseline is deferred. Only the
+  token counts survive (they need no pricing). See §11 Plan 1 for the fixes.
+
+Revised ordered steps:
+
+1. ~~Baseline via `miss_audit`~~ — done; token counts captured, cost deferred (broken).
+2. ~~Apply A1/A3 remediation~~ — A1 already applied; A3 driver absent. Nothing to apply.
+3. Fix `miss_audit` (Plan 1), then recompute the cost baseline on the fixed tool.
+4. Cleanup: drop A1's dead `session_start` assertion hook; fix `datetime.utcnow()` at
+   `shape.py:856` (Plan 1).
 
 ## 8. What remains impossible (preserved from IMPL-SPEC §7)
 
@@ -246,6 +256,16 @@ G-gate that asserts a channel works — Track B's `PreToolUse` enforcement gate 
 since a silently-shadowed callback looks identical to a working one until you force a
 denial and watch it hold.
 
+**§12.9 also binds tool *output*, not just channels.** The 2026-09-26 baseline run
+produced `total_usd = −114,073` — an impossible value — and it was nearly reported as a
+finding because the number "looked plausible" in aggregate. A negative total cost is a
+failure that should stop a report before it is written. **Any figure with a
+by-construction bound (cost ≥ 0, hit_ratio ∈ [0,1], turns ≥ 0 and bounded by window/
+min-turn-cost) must be asserted against that bound in the tool, and the assertion must
+have been seen to fire.** `miss_audit` had no such guard; Plan 1 adds one (`total_usd ≥
+0` regression test). The dollar figures from that run are discarded; only the
+pricing-free token counts survive (`docs/baseline-2026-09-26.md`).
+
 ## 10. Resolved decisions (were open questions)
 
 - **Track B UX.** `ccgate run --task <file>`, streaming stdout, writes its own session
@@ -264,11 +284,32 @@ denial and watch it hold.
 
 ## 11. Plan split
 
-Two plans, per the sequencing above:
+Baseline capture (2026-09-26) ran first and **changed Plan 1's center.** It revealed
+`miss_audit`'s cost path is broken (see `docs/baseline-2026-09-26.md` §"Why no dollar
+figures" and §12 below), and that A1 is already applied and A3's driver is absent. So
+Plan 1 is no longer "apply remediation" — it is "make the measurement trustworthy and
+clean up dead code."
 
-- **Plan 1 — "A1/A3 finish + baseline + dead-hook cleanup."** Small, separable, and it
-  unblocks the baseline work. Contains: baseline capture, remediation verification (§7),
-  A1 assertion-hook removal, A4/`session_start` dead-hook removal (logic ported later),
-  the `datetime.utcnow()` fix. Ships first.
-- **Plan 2 — "Track A + Track B."** The measurement re-baseline and the owned loop. A
-  different size; must not be held up by Plan 1.
+- **Plan 1 — "Fix miss_audit + dead-hook cleanup."** Small, separable. Contains:
+  1. Fix the negative-cost bug (`miss_audit.py:102`): fresh-input term is
+     `input_tokens × rate_in`, not `(input_tokens − cache_read − cache_creation) ×
+     rate_in`. Add a regression test asserting `total_usd ≥ 0` on any real transcript.
+  2. Resolve BUILD-SPEC §12 Q1: `turns_remaining_est` must use full per-turn context
+     (`input + cache_read + cache_creation`), not `input_tokens` alone
+     (`miss_audit.py:54`). Test: median-tpt on a cached session is thousands, not ~3.
+  3. Exclude or separately bucket subagent transcripts (`.../subagents/agent-*.jsonl`)
+     in `miss_audit` — 92.6% of the corpus; cold-starts are not waste.
+  4. Fix the `D1.unclassified` fix-string (`taxonomy.py:39`): attribution is blocked by
+     the statusline policy, not a Claude Code version; "upgrade" is wrong.
+  5. Dead-hook cleanup: remove A1's `session_start` assertion hook and the
+     A4 `PreCompact`/`SessionStart` wiring (port `_extract` logic to Track B, §3); fix
+     `datetime.utcnow()` at `shape.py:856`.
+
+  Ships first. Until 1–3 land, ccgate cannot produce a cost figure anyone should act on.
+- **Plan 2 — "Track A + Track B."** The measurement re-baseline (now on a *fixed*
+  `miss_audit`) and the owned loop. A different size; must not be held up by Plan 1.
+
+Note: A1/A3 remediation is **not** in either plan — A1 is already applied (pin live) and
+A3's driver does not occur on this machine (zero `tools_changed` in 114K requests). A3's
+`ENABLE_TOOL_SEARCH` remains available as cheap insurance if a gateway base URL is ever
+introduced.
