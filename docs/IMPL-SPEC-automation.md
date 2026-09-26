@@ -300,6 +300,16 @@ G19 and G20 are the user-trust gates. A switch guard that throws, or that blocks
 
 ## 6. Build order
 
+> **SUPERSEDED (2026-09-26).** The Track A/B split below assumed hooks and
+> `statusLine` work. On the reference machine an org policy blocks both. The
+> tracks are redefined in
+> `docs/superpowers/specs/2026-09-26-two-track-architecture-design.md`
+> (Track A = read-only measurement; Track B = owned Agent SDK loop). A1/A3
+> config remediation is unaffected and still ships first; A2/A4/A5 relocate to
+> Track B. The A1–A5 *component logic and configs* in §§3–5 above remain valid
+> and are ported by the new design — only the delivery mechanism and the
+> build-order framing here are superseded.
+
 ```
 A1  session pinning          ── config only, no hook, ship first
 A3  tool deferral            ── config only, highest single-check value

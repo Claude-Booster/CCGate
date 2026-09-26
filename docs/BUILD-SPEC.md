@@ -436,7 +436,7 @@ Mirrors the read-only-first pattern: prove the measurement before touching behav
 
 5. **Scope of the `/ccgate` skill** — one command only. Sub-reports are reached via arguments (`/ccgate audit`, `/ccgate shape`). Config editing is out of scope for the skill entirely: users edit `~/.ccgate/config.json` directly or run `ccgate config set <key> <value>` from the terminal. The skill description stays under ~80 words.
 
-6. **Two-track split: measurement in-surface, enforcement in an owned loop.** The reference machine's Claude org policy blocks every settings-derived execution channel: all hooks (all five events) and `statusLine` (`allowManagedHooksOnly` takes both). Verified 2026-09-26. Therefore:
+6. **Two-track split: measurement in-surface, enforcement in an owned loop.** Full design: `docs/superpowers/specs/2026-09-26-two-track-architecture-design.md`. The reference machine's Claude org policy blocks every settings-derived execution channel: all hooks (all five events) and `statusLine` (`allowManagedHooksOnly` takes both). Verified 2026-09-26. Therefore:
 
    - **Track A — measurement.** Read the transcript JSONL at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. Token counts come from `usage` blocks — ground truth per I4, replacing the `chars // 4` estimate the hook path used. This is an upgrade, not a fallback: the ledger previously ran entirely on estimates. Per-call spawn cost disappears, so G7 stops being the binding constraint.
    - **Track B — enforcement.** Anything that must intercept — `.contextignore` denial, read cache, Bash rewriting (§5.5), and A2/A4 — moves to a ccgate-owned Agent SDK loop. Nothing in the interactive surface can intercept a tool call.
