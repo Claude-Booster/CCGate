@@ -43,6 +43,42 @@ def test_parse_standard_payload():
     assert result["tokens"]["cache_creation"] == 500
 
 
+def _mk_type_payload(type_value: str, amount: int = 9000) -> dict:
+    return {"resourceMetrics": [{"scopeMetrics": [{"metrics": [{
+        "name": "claude_code.token.usage",
+        "sum": {"dataPoints": [{
+            "attributes": [
+                {"key": "type", "value": {"stringValue": type_value}},
+                {"key": "session.id", "value": {"stringValue": "alias-001"}},
+            ],
+            "asInt": str(amount),
+        }]},
+    }]}]}]}
+
+
+def test_camelcase_type_labels_normalize():
+    """Claude Code emits camelCase; these must not silently bucket to 'unknown'."""
+    assert _parse_payload(_mk_type_payload("cacheRead"))["tokens"]["cache_read"] == 9000
+    assert (
+        _parse_payload(_mk_type_payload("cacheCreation"))["tokens"]["cache_creation"]
+        == 9000
+    )
+
+
+def test_snakecase_type_labels_still_work():
+    assert _parse_payload(_mk_type_payload("cache_read"))["tokens"]["cache_read"] == 9000
+    assert (
+        _parse_payload(_mk_type_payload("cache_creation"))["tokens"]["cache_creation"]
+        == 9000
+    )
+
+
+def test_genuinely_unknown_type_still_buckets_to_unknown():
+    r = _parse_payload(_mk_type_payload("someFutureType"))
+    assert r["tokens"]["unknown"] == 9000
+    assert r["tokens"]["cache_read"] == 0
+
+
 def test_unknown_type_label():
     payload = json.loads(FIXTURE.read_text())
     result = _parse_payload(payload)
