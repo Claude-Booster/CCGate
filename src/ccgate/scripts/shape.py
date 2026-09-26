@@ -798,7 +798,7 @@ def stage_fixes(
         _version = "0.1.0"
 
     return {
-        "generated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "cwd": cwd_str,
         "ccgate_version": _version,
         "fixes": fixes,
@@ -1003,7 +1003,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.fix:
             report = stage_fixes(args.cwd, config, fix_skills=args.fix_skills)
             reports_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
             report_path = reports_dir / f"fix-{ts}.json"
             report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
             if not report["fixes"] and not report["skipped"]:

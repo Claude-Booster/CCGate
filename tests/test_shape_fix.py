@@ -88,6 +88,14 @@ class TestStageFixes:
             report = stage_fixes(cwd=str(tmp_path))
         jsonschema.validate(instance=report, schema=schema)  # raises on failure
 
+    def test_stage_fixes_generated_no_deprecation_and_valid_format(self, tmp_path):
+        """stage_fixes() 'generated' field is produced without DeprecationWarning."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            with patch("ccgate.scripts.shape.Path.home", return_value=tmp_path):
+                report = stage_fixes(cwd=str(tmp_path))
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", report["generated"])
+
 
 class TestApplyFixes:
     def _base_report(self, tmp_path, fixes=None):
