@@ -16,6 +16,7 @@
 - Never emit the PII identifiers enumerated in `.githooks/pre-commit` (the user's real name, email local-part, employer, and handles). That hook blocks them in staged content and in git identity — do not paste real paths/usernames into committed files; use repo-relative paths.
 - Git identity is `Developer` / `fredman08@users.noreply.github.com`. End each commit message with the `Co-Authored-By:` line from your session's current attribution reminder (do not hardcode one from this plan).
 - **§12.9 discipline (binds every task):** each defect's red state must be *observed* before its fix — run the test (or command) against the current code and see it fail/produce the impossible value first. A regression test that never failed against the old code proves nothing. Any figure with a by-construction bound (token counts ≥ 0, `cache_read_rate` ∈ [0,1], `hit_ratio` ∈ [0,1]) must be asserted against that bound.
+- **Reviewer instruction (subagent-driven execution):** for each task, the reviewer must confirm the observed failure **message** matches what the plan's "Expected: FAIL with …" predicts — not merely that *something* failed. An `ImportError` where the plan predicted a `KeyError` (or a missing-key `AssertionError`) means the test is not exercising the defect it claims to. The self-attested red→green loop — same agent writes the test, runs it, reports it went red — is exactly what let the negative total through; the reviewer seeing the actual red output is the structural fix.
 - Token figures are exact integers from `usage` blocks (I4 ground truth). No `chars // 4` estimates in the reported numbers.
 
 ## Review Focus
@@ -112,7 +113,11 @@ git commit -m "feat(transcript): add grand_total_input helper (canonical total-i
 
 **Files:**
 - Modify: `src/ccgate/scripts/miss_audit.py:42-67` (remove `_turns_remaining_est`), `:83` (remove turns init), `:97-134` (remove cost accumulation, keep classification; add token totals), `:136-169` (rewrite summary), `:172-195` (rewrite render)
-- Test: `tests/test_miss_audit.py` (remove `TestTurnsRemainingEst`, rewrite `test_report_schema_fields_present` and `test_d2_compaction_not_in_avoidable_total`)
+- Modify: `schema/ccgate.report.schema.json` — **required**: this schema currently requires `assumptions`, `avoidable_usd`, `total_usd`, `cost_usd`, `turns_remaining_est`; the new report omits all of them, so the schema must change in lockstep or `schema_check.py` fails.
+- Modify: `tests/schema_check.py` — same required-key lists (verified consumers via grep 2026-09-26).
+- Test: `tests/test_miss_audit.py` (remove `TestTurnsRemainingEst`, replace `test_report_schema_fields_present` and `test_d2_compaction_not_in_avoidable_total`)
+
+**Downstream check already done (2026-09-26):** `grep -rn "cost_usd\|avoidable_usd\|total_usd\|turns_remaining\|assumptions"` across `src/ tests/ schema/` found exactly two consumers of these keys — `schema/ccgate.report.schema.json` and `tests/schema_check.py` (both updated in this task). `statusline.py`'s `total_cost_usd` is a *different* key (the statusline payload's cost) and is unaffected.
 
 **Interfaces:**
 - Consumes: `grand_total_input` (Task 1).
@@ -255,15 +260,19 @@ def _render_table(report: dict) -> str:
 
 Remove any now-unused imports (`get_model_spec` if unused elsewhere; check `--assert` path still uses what it needs).
 
-- [ ] **Step 5: Run to verify pass, and confirm the whole file's tests**
+8. Update `schema/ccgate.report.schema.json`: drop `"assumptions"` from the top-level `required`; in `summary`, change `required` to `["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens"]` and replace the `avoidable_usd`/`total_usd` properties with `"cache_read_rate": {"type": "number"}` and `"tokens": {"type": "object"}`; in `misses.items`, drop `"cost_usd"` from `required` and from `properties`; delete the entire `"assumptions"` property block.
 
-Run: `python -m pytest tests/test_miss_audit.py -v`
-Expected: PASS — new tests green; `TestTurnsRemainingEst` gone; `TestClassifyRequests`/`TestAttributeMiss`/`test_model_switch_fixture`/`test_clean_session_has_no_avoidable_misses` still pass (they are count/cause based).
+9. Update `tests/schema_check.py` `_check_report`: drop `"assumptions"` from the top-level key loop; change the summary key loop to `("total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens")`; delete the `assumptions` block (lines 29-32); change the miss-entry key loop to `("cause", "count", "recached_tokens", "fix")`.
+
+- [ ] **Step 5: Run to verify pass, and confirm the whole file's tests + schema check**
+
+Run: `python -m pytest tests/test_miss_audit.py -v && python tests/schema_check.py`
+Expected: PASS — new tests green; `TestTurnsRemainingEst` gone; `TestClassifyRequests`/`TestAttributeMiss`/`test_model_switch_fixture`/`test_clean_session_has_no_avoidable_misses` still pass (count/cause based); `schema_check.py` prints `G9 PASS`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/ccgate/scripts/miss_audit.py tests/test_miss_audit.py
+git add src/ccgate/scripts/miss_audit.py tests/test_miss_audit.py schema/ccgate.report.schema.json tests/schema_check.py
 git commit -m "fix(miss_audit): drop broken cost/turns layer; report raw tokens + cache_read_rate
 
 Resolves the negative-total and 66661-turn defects by removing the undefensible
@@ -278,11 +287,14 @@ plan with a validated pricing table and a defensible turns estimator."
 
 **Files:**
 - Modify: `src/ccgate/scripts/miss_audit.py` (add `is_subagent_transcript`; split request/miss counts by origin into `summary["by_origin"]`)
+- Modify: `schema/ccgate.report.schema.json` and `tests/schema_check.py` (add `by_origin` to the summary contract)
 - Test: `tests/test_miss_audit.py`
 
 **Interfaces:**
 - Consumes: `run_audit` from Task 2.
 - Produces: `is_subagent_transcript(path: Path) -> bool`; `summary["by_origin"] = {"main": {"requests": int, "misses": int}, "subagent": {"requests": int, "misses": int}}`. Both buckets always present.
+
+**§12.9 convention verified against the live corpus (2026-09-26):** `"subagents" in Path(p).parts` matched the `agent-` basename heuristic **exactly** on all 1090 local transcripts (1007 subagent / 83 main, set-equal). Real subagent path shape: `.../<session-uuid>/subagents/agent-<hash>.jsonl`. The convention is a cross-checked contract, not a guess — but re-run this check if a future Claude Code version changes the layout.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -315,6 +327,33 @@ class TestByOrigin:
         bo = report["summary"]["by_origin"]
         assert bo["main"]["misses"] + bo["subagent"]["misses"] == \
             report["summary"]["total_misses"]
+
+    def test_subagent_misses_land_in_subagent_bucket(self, tmp_path):
+        # THE defect this task fixes: subagent cold-start misses were counted as
+        # avoidable main-thread waste. Build a real transcript under a subagents/
+        # dir with a genuine miss (turn 2 re-processes 5000 tokens) and run it
+        # through run_audit — its miss must land in the subagent bucket, not main.
+        import json
+        sub = tmp_path / "sess-uuid" / "subagents" / "agent-deadbeef.jsonl"
+        sub.parent.mkdir(parents=True)
+        lines = [
+            {"type": "assistant", "timestamp": "2026-09-26T10:00:00.000Z",
+             "message": {"model": "claude-sonnet-5", "usage": {
+                 "input_tokens": 5000, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5000,
+                 "cache_creation": {"ephemeral_1h_input_tokens": 5000}}}},
+            {"type": "assistant", "timestamp": "2026-09-26T10:00:05.000Z",
+             "message": {"model": "claude-sonnet-5", "usage": {
+                 "input_tokens": 5000, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5000,
+                 "cache_creation": {"ephemeral_1h_input_tokens": 5000}}}},
+        ]
+        sub.write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+        report = run_audit([sub], DEFAULTS)
+        bo = report["summary"]["by_origin"]
+        assert report["summary"]["total_misses"] >= 1
+        assert bo["subagent"]["misses"] == report["summary"]["total_misses"]
+        assert bo["main"]["misses"] == 0
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -346,15 +385,19 @@ In `run_audit`, before the per-request loop for each `path`, compute `origin = "
 
 In the loop, increment `by_origin[origin]["requests"] += 1` per request, and `by_origin[origin]["misses"] += 1` in the MISS branch. Add `"by_origin": by_origin` to the `summary` dict in the return.
 
+Then extend the schema contract:
+- `schema/ccgate.report.schema.json`: add `"by_origin"` to the `summary` `required` list, and add the property `"by_origin": {"type": "object"}`.
+- `tests/schema_check.py`: add `"by_origin"` to the summary key loop.
+
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python -m pytest tests/test_miss_audit.py -v`
-Expected: PASS (all, including Task 2's tests).
+Run: `python -m pytest tests/test_miss_audit.py -v && python tests/schema_check.py`
+Expected: PASS (all, including Task 2's tests); `schema_check.py` prints `G9 PASS`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/ccgate/scripts/miss_audit.py tests/test_miss_audit.py
+git add src/ccgate/scripts/miss_audit.py tests/test_miss_audit.py schema/ccgate.report.schema.json tests/schema_check.py
 git commit -m "feat(miss_audit): bucket main vs subagent transcripts
 
 92.6% of the local corpus is subagent transcripts whose cold starts are
@@ -380,16 +423,18 @@ main-thread signal is not drowned by subagent cold starts."
 from ccgate import taxonomy
 
 
-def test_unclassified_hint_does_not_blame_version():
-    hint = taxonomy.FIX_HINTS[taxonomy.D1_UNCLASSIFIED]
-    assert "upgrade" not in hint.lower()
-    assert "attribution" in hint.lower()
+def test_unclassified_hint_names_the_policy_block():
+    hint = taxonomy.FIX_HINTS[taxonomy.D1_UNCLASSIFIED].lower()
+    # not just the absence of one word — pin the actual claim
+    assert "upgrade" not in hint
+    assert "attribution" in hint
+    assert "statusline" in hint  # names why attribution is unavailable here
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `python -m pytest tests/test_taxonomy.py::test_unclassified_hint_does_not_blame_version -v`
-Expected: FAIL — current hint is `"upgrade Claude Code for cause attribution"`.
+Run: `python -m pytest tests/test_taxonomy.py::test_unclassified_hint_names_the_policy_block -v`
+Expected: FAIL — current hint is `"upgrade Claude Code for cause attribution"` (contains "upgrade", lacks "statusline").
 
 - [ ] **Step 3: Implement**
 
