@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["sessions", "summary", "misses"],
+  "properties": {
+    "sessions":   {"type": "array", "items": {"type": "string"}},
+    "date_range": {
+      "type": "object",
+      "properties": {
+        "start": {"type": "string"},
+        "end":   {"type": "string"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total_requests", "total_misses", "expected_rebuilds", "hit_ratio", "cache_read_rate", "tokens", "by_origin"],
+      "properties": {
+        "total_requests":    {"type": "integer"},
+        "total_misses":      {"type": "integer"},
+        "expected_rebuilds": {"type": "integer"},
+        "hit_ratio":         {"type": "number"},
+        "cache_read_rate":   {"type": "number"},
+        "tokens":            {"type": "object"},
+        "by_origin":         {"type": "object"}
+      }
+    },
+    "misses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cause", "count", "recached_tokens", "fix"],
+        "properties": {
+          "cause":           {"type": "string"},
+          "count":           {"type": "integer"},
+          "recached_tokens": {"type": "integer"},
+          "fix":             {"type": "string"}
+        }
+      }
+    }
+  }
+}

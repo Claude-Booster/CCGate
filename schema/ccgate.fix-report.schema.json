@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "generated", "cwd", "ccgate_version", "fixes", "skipped",
+    "applied", "applied_at",
+    "startup_chars_before", "startup_chars_after",
+    "startup_tokens_before_approx", "startup_tokens_after_approx",
+    "startup_delta_approx"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "generated":   {"type": "string"},
+    "cwd":         {"type": "string"},
+    "ccgate_version": {"type": "string"},
+    "fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "file", "action", "description"],
+        "properties": {
+          "check":       {"type": "string"},
+          "file":        {"type": "string"},
+          "action":      {"type": "string", "enum": ["json_set", "json_append", "create", "frontmatter_set"]},
+          "key":         {"type": "string"},
+          "value":       {},
+          "content":     {"type": "string"},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "reason"],
+        "properties": {
+          "check":  {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "applied":                       {"type": "boolean"},
+    "applied_at":                    {"type": ["string", "null"]},
+    "startup_chars_before":          {"type": ["integer", "null"]},
+    "startup_chars_after":           {"type": ["integer", "null"]},
+    "startup_tokens_before_approx":  {"type": ["integer", "null"]},
+    "startup_tokens_after_approx":   {"type": ["integer", "null"]},
+    "startup_delta_approx":          {"type": ["integer", "null"]}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"\nimport sys, json, subprocess, os\nfrom pathlib import Path\ndata = json.load(sys.stdin)\nfp = data.get('tool_input', {}).get('file_path', '')\nif not fp.endswith('.py'): sys.exit(0)\np = Path(fp) if Path(fp).is_absolute() else Path(os.getcwd()) / fp\nroot = p.parent\nwhile root != root.parent:\n    if (root / 'pyproject.toml').exists() or (root / 'pytest.ini').exists(): break\n    root = root.parent\nelse: sys.exit(0)\ntests_dir = root / 'tests'\nif not tests_dir.exists(): sys.exit(0)\nstem = p.stem\nif stem.startswith('test_'):\n    targets = [str(p)]\nelse:\n    matches = list(tests_dir.glob(f'test_{stem}.py')) + list(tests_dir.glob(f'test_*{stem}*.py'))\n    seen = set(); targets = []\n    for m in matches:\n        r = str(m.resolve())\n        if r not in seen: seen.add(r); targets.append(str(m))\n    if not targets: sys.exit(0)\nresult = subprocess.run(['python', '-m', 'pytest', '--tb=short', '-q'] + targets, cwd=str(root), capture_output=True, text=True)\nout = (result.stdout or '') + (result.stderr[-300:] if result.stderr else '')\nif result.returncode != 0: print(out[-2000:])\nsys.exit(result.returncode)\n\"",
+            "timeout": 30,
+            "statusMessage": "Running paired tests..."
+          }
+        ]
+      }
+    ]
+  }
+}

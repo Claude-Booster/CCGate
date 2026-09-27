@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["session_id", "requests"],
+  "properties": {
+    "session_id":      {"type": "string"},
+    "transcript_path": {"type": "string"},
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "classification"],
+        "properties": {
+          "index":          {"type": "integer"},
+          "timestamp":      {"type": "string"},
+          "model_id":       {"type": "string"},
+          "classification": {"type": "string", "enum": ["HIT", "MISS", "EXPECTED_REBUILD"]},
+          "miss_cause":     {"type": ["string", "null"]},
+          "re_processed":   {"type": "integer"},
+          "miss_cost_usd":  {"type": ["number", "null"]}
+        }
+      }
+    }
+  }
+}
