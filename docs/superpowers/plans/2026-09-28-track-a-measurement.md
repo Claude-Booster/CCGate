@@ -196,12 +196,41 @@ def test_fixture_reproduces_known_counts():
     }
 ```
 
-- [ ] **Step 4: Run to verify it passes (fixture designed to match)**
+- [ ] **Step 4: Run — and on mismatch, hand-count, do not "adjust until green"**
 
 Run: `python -m pytest tests/test_report_fixture.py -q`
-Expected: PASS. If any figure mismatches, the fixture math is wrong — fix the fixture, not the test, until it matches the by-construction counts above.
+Expected: PASS.
 
-- [ ] **Step 5: Commit**
+**On mismatch, do NOT edit the fixture (or the test) until the numbers line up** — that
+would encode a `run_audit` summation bug into the very gate meant to detect it (the
+"never edit a gate to make it pass" rule, one layer up; this is the self-attestation
+loop that let Plan 1's negative total through). Instead:
+
+1. **Hand-count the JSONL by eye** against `classify_requests` / `run_audit` logic:
+   per transcript, walk requests tracking `expected_cache`; a request is a MISS when
+   `expected_cache - cache_read > max(0.05*expected_cache, 2000)`. Sum tokens directly.
+2. Decide which side is wrong: the **declared counts** (a typo in the test's expected
+   values or the fixture data), or **`run_audit`** (a real summation bug).
+3. Fix the fixture/test **only** if the JSONL genuinely does not contain what the
+   declared counts claim. If `run_audit` is the one that mis-sums, that is a product
+   bug — stop and fix `run_audit` (with its own failing test), do not paper over it in
+   the fixture.
+
+- [ ] **Step 5: Prove the gate has a red state (§12.9 — witness it detecting drift)**
+
+The gate goes green on first run by design; a gate whose failure was never seen is not
+evidence. Force the red state:
+
+```bash
+# Corrupt one fixture line, e.g. change main.jsonl's 3rd request cache_read to 100000
+# (turning the MISS into a HIT), then:
+python -m pytest tests/test_report_fixture.py -q
+```
+Expected: FAIL (`total_misses == 2` assertion breaks → now 1). Then **revert the edit**
+(`git checkout tests/fixtures/track_a_report/main.jsonl`) and re-run to confirm PASS.
+This proves the gate detects fixture drift — its entire purpose.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add tests/fixtures/track_a_report tests/test_report_fixture.py
