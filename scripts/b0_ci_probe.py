@@ -6,6 +6,13 @@ Proves the hook overrides allowed_tools, not just that some deny exists.
 
 Runs `ccgate run` with cwd = the fixture dir, so load_contextignore reads the fixture's own
 .contextignore (which lists target_secret.txt). The target is a committed fixture — never a real path.
+
+MUST RUN IN CI (token principal), not on the interactive-login dev machine. Verified 2026-09-28:
+on-desk, the enterprise org filesystem sandbox blocks the BASELINE read regardless of tools/
+allowed_tools/add_dirs/permission_mode — so PROBE_RED_READ_HAPPENED is False on-desk and the
+probe correctly fails. The deny hook itself was confirmed firing on-desk (default AND
+bypassPermissions). Per the handoff, the org policy does not reach the CLAUDE_CODE_OAUTH_TOKEN
+principal, so in CI the baseline read succeeds and the red->green shadowing proof completes.
 """
 import subprocess
 import sys

@@ -21,9 +21,13 @@ def _build_options(patterns, enforce: bool):
     return {
         "hooks": {"PreToolUse": hooks_list},
         "setting_sources": [],
-        # B0 grants only Read: the deny under test is Read-scoped, and withholding Bash/Grep
-        # removes the non-Read route to a .contextignore'd file (keeps the proof deterministic).
+        # B0 grants only Read. `tools` controls AVAILABILITY (the model can call nothing else),
+        # `allowed_tools` auto-APPROVES it (executes without a permission prompt — required in
+        # non-interactive mode). Both are needed: allowed_tools alone leaves Bash/Grep available
+        # but unapproved, so the model reaches for them and is blocked before ever using Read.
+        # Withholding non-Read tools also removes the bypass around the .contextignore deny.
         # B1 broadens tools and extends enforcement (Bash rewrite) to match.
+        "tools": ["Read"],
         "allowed_tools": ["Read"],
     }
 
@@ -37,6 +41,7 @@ def _factory(options):
     return ClaudeSDKClient(options=ClaudeAgentOptions(
         hooks=hooks,
         setting_sources=options["setting_sources"],
+        tools=options["tools"],
         allowed_tools=options["allowed_tools"],
     ))
 
