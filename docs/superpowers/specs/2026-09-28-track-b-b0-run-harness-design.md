@@ -51,12 +51,21 @@ plugs into. Later sub-projects each get their own spec → plan:
    - **"Comparable work" — operational definition:** the **same `--task` file run both
      ways** — once with enforcement disabled (`ccgate run --no-enforce`, the baseline) and
      once enabled (treatment) — misses/1k computed from each run's record via `ccgate
-     audit`. **Caveat, stated now not discovered at B2:** a live model is non-deterministic,
-     so "same task" does not guarantee identical tool sequences; where run-to-run variance
-     is material, average over N runs each way. This is the simplest defensible definition;
-     if it proves impractical at B1/B2, that is a finding to raise then, not a silent gap.
-     (This exists because Q1's `turns_remaining_est` stayed unresolved for a week for want
-     of an operational definition.)
+     audit`. Two caveats, stated now not discovered at B2:
+     - **Trajectory divergence (the larger effect).** Disabling the hook does not merely
+       turn off denial — it changes *what the agent reads*, and the two runs diverge from
+       the first denied read onward. So "same task" yields two different sessions, not a
+       controlled A/B. This is the honest comparison (it measures the real downstream effect
+       of enforcement), but it is not a clean paired diff, and the write-up must say so.
+     - **Model non-determinism.** Even identical config does not guarantee identical tool
+       sequences run to run.
+   - **Do NOT fix an N now** — you don't know the variance yet, and any N would be a guess
+     (the exact `turns_remaining_est`-from-five-observations failure). Instead, **B1
+     prerequisite (trigger, not a number):** run the same task twice with *identical* config
+     and measure the misses/1k spread. If that run-to-run spread is larger than the
+     enforcement effect you're trying to detect, single-run comparison is dead and you need
+     N runs each way — and that two-run measurement is what tells you N. Decide N from data
+     at B1; do not carry a guessed N into this spec.
 
 ## 3. SDK interaction model
 
@@ -119,7 +128,10 @@ A small `src/ccgate/run/` package, each unit one job:
   `{"type":"ccgate_run_end","status":"complete","run_id":...}` line. **Absence of that line
   = a crashed/incomplete run.** `read_transcript` already ignores non-`assistant` lines, so
   the marker never pollutes token counts; a small `run/record.py` helper reports
-  completeness for callers that care.
+  completeness for callers that care. **Verify, don't assume, the marker is harmless to
+  measurement:** an in-process test must show that `run_audit` (via `read_transcript`)
+  produces *identical* token counts for a record with the terminal marker and the same
+  record without it (§9). This project has been wrong before about "that line is ignored."
 - **Raw material for later attribution** (§10): per-turn `usage` + model id + timestamp are
   captured now so B1+ can attribute misses the interactive surface can't (the handoff's open
   question). B0 does no attribution itself.
@@ -133,6 +145,14 @@ reason naming the path. No match → `{}` (allow). No `.contextignore` present �
 This is the exact `permissionDecision: "deny"` mechanism F1–F3 will all reuse; it stays and
 grows in B1 (read-cache, Bash rewrite via `updated_input`, richer matching).
 
+**`--no-enforce` safety (every baseline run, not just the test).** The `--no-enforce`
+baseline (§2) omits the hook, so the agent **genuinely performs the reads the treatment
+denies** — the same public-repo safety consideration as §7's hook-absent red state, but
+applying to *every* baseline run rather than only the CI test. A baseline run must therefore
+be pointed only at work whose `.contextignore`'d reads are safe to actually perform;
+`ccgate run --no-enforce` is a measurement tool, not a safe default, and the flag's help
+text says so.
+
 ## 7. CI-runnability & verification
 
 Splits like Track A's did (the agent cannot run the SDK loop to green — auth, network,
@@ -142,7 +162,9 @@ Splits like Track A's did (the agent cannot run the SDK loop to green — auth, 
 - `policy.py`: match/decision, including the **deny's red state** (a `.contextignore`'d path
   denied; a non-matching path allowed).
 - `record.py`: SDK-message → JSONL mapping produces entries `read_transcript` parses;
-  append-per-turn ordering; terminal-marker presence/absence → completeness helper.
+  append-per-turn ordering; terminal-marker presence/absence → completeness helper; **marker
+  harmlessness — `run_audit` token counts identical with and without the terminal marker**
+  (§5).
 - **Fake `ClaudeSDKClient`** driving `cli.py` end-to-end: hook wired, stream consumed,
   record written, deny handled — deterministic, no auth/network.
 
