@@ -31,23 +31,47 @@ def _run(no_enforce: bool) -> tuple[int, str]:
     return r.returncode, (r.stdout + r.stderr)
 
 
-def evaluate(baseline_rc: int, baseline_out: str, treatment_rc: int, treatment_out: str) -> int:
+def parse_record_path(output: str) -> str | None:
+    """Extract the record path from a run's 'run record: <path>' line, or None."""
+    marker = "run record: "
+    for line in output.splitlines():
+        if line.startswith(marker):
+            return line[len(marker):].strip()
+    return None
+
+
+def _tokens_ok(output: str) -> bool:
+    """True if the run's record captured real usage (measurement substrate, review #3)."""
+    p = parse_record_path(output)
+    if not p:
+        return False
+    from ccgate.scripts.miss_audit import run_audit
+    try:
+        return run_audit([Path(p)], {})["summary"]["tokens"]["grand_total_input"] > 0
+    except Exception:
+        return False
+
+
+def evaluate(baseline_rc: int, baseline_out: str, treatment_rc: int, treatment_out: str,
+             baseline_tokens_ok: bool) -> int:
     """Positive acceptance (review #1): both runs must COMPLETE cleanly (rc 0). Red = baseline
     actually read the file (SENTINEL present); green = treatment ran but did NOT read it. A
-    treatment crash (rc!=0) must never be mistaken for a successful deny."""
+    treatment crash (rc!=0) must never be mistaken for a successful deny. And the baseline record
+    must have captured real usage (review #3) — proving the measurement substrate, not just the deny."""
     both_ran = baseline_rc == 0 and treatment_rc == 0
     ok_red = both_ran and (SENTINEL in baseline_out)          # without the hook, the read happened
     ok_green = both_ran and (SENTINEL not in treatment_out)   # with the hook, and cleanly, it did not
     print(f"PROBE_BOTH_RUNS_CLEAN={both_ran}")
     print(f"PROBE_RED_READ_HAPPENED={ok_red}")
     print(f"PROBE_GREEN_READ_DENIED={ok_green}")
-    return 0 if (ok_red and ok_green) else 1
+    print(f"PROBE_BASELINE_RECORDED_TOKENS={baseline_tokens_ok}")
+    return 0 if (ok_red and ok_green and baseline_tokens_ok) else 1
 
 
 def main() -> int:
     b_rc, b_out = _run(no_enforce=True)
     t_rc, t_out = _run(no_enforce=False)
-    return evaluate(b_rc, b_out, t_rc, t_out)
+    return evaluate(b_rc, b_out, t_rc, t_out, _tokens_ok(b_out))
 
 
 if __name__ == "__main__":
