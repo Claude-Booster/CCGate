@@ -1,6 +1,6 @@
 import pytest
 
-from ccgate.report import assert_bounds
+from ccgate.report import assert_bounds, compute_ledger, _D4_CHECKS
 
 VALID = {
     "total_requests": 5, "total_misses": 2, "hit_ratio": 0.6, "cache_read_rate": 0.25,
@@ -54,3 +54,41 @@ def test_rate_out_of_range_fires():
     bad = {**VALID, "cache_read_rate": 1.5}
     with pytest.raises(ValueError):
         assert_bounds(bad)
+
+
+def test_ledger_zeros_are_honest():
+    led = compute_ledger([])
+    assert led["tokens_avoided"] == 0
+    assert led["tokens_measured"] == 0
+    assert led["tokens_injected"] == 0
+    assert led["net"] == 0
+
+
+def test_ledger_prevented_is_per_cause():
+    led = compute_ledger([])
+    prevented = led["tokens_prevented"]
+    assert prevented["a1"]["status"] == "unmeasurable"
+    assert prevented["a3"]["value"] == 0
+    assert prevented["d4"]["status"] == "available_unapplied"
+    assert prevented["d4"]["findings"] == []
+
+
+def test_ledger_d4_filters_shape_findings():
+    findings = [
+        {"check": "claudeMdExcludes", "severity": "warning"},
+        {"check": "denyReads", "severity": "warning"},
+        {"check": "toolDeferralSummary", "severity": "info"},  # not D4 → excluded
+    ]
+    led = compute_ledger(findings)
+    d4 = led["tokens_prevented"]["d4"]["findings"]
+    assert {f["check"] for f in d4} == {"claudeMdExcludes", "denyReads"}
+    assert all(c in _D4_CHECKS for c in {"claudeMdExcludes", "denyReads", "claudeMdLines", "skillListing"})
+
+
+def test_ledger_prevented_has_no_token_estimate():
+    """D4 findings carry no fabricated number (spec §3)."""
+    led = compute_ledger([{"check": "claudeMdExcludes", "severity": "warning"}])
+    d4 = led["tokens_prevented"]["d4"]
+    assert "value" in d4 and d4["value"] is None
+    for f in d4["findings"]:
+        assert "estimated_tokens" not in f
