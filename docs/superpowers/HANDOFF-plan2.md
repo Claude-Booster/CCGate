@@ -26,10 +26,17 @@ Ran on the user's terminal: 27 failed (`WinError 6 DuplicateHandle`), reproduces
 - **Track B (`ccgate run`) spawn path is UNAFFECTED** — SDK spawns the CLI fine; runtime subprocess works. This is a pytest-suite-only bug.
 - **VERIFIED FIX (Plan 2 task):** add `stdin=subprocess.DEVNULL` to the subprocess helpers in `test_baseline`, `test_digest`, `test_miss_audit_g4g5`, `test_otel_reader`, `test_since_filter` (confirmed: makes the failing test pass in the full-collection context). Small, mechanical. After applying, verify the full green suite in the user's terminal (~6min there; 20+min via agent — don't).
 
-## One blocker (yours, before the CI probe)
-- **Set `CLAUDE_CODE_OAUTH_TOKEN`** (from `claude setup-token`) as a repo secret on `Claude-Booster/CCGate`. NOT an API key — the managed corporate account does not provide `ANTHROPIC_API_KEY`; single-user automation via the OAuth token is the permitted path.
+## CI probe — DONE (2026-09-28), Track-B-in-CI is GREEN
+`CLAUDE_CODE_OAUTH_TOKEN` set; probe built (`ci-probe.yml`, workflow_dispatch), merged to main (PR #2), triggered (run 36384205614, success). Results:
+- **PROBE_AUTH_EGRESS: OK** — OAuth token authenticates the SDK + API egress works from a GitHub-hosted runner.
+- **PROBE_SDK_PRETOOL_HOOK_FIRED: 1 ['Bash']** — the programmatic PreToolUse hook fired AND denied in CI. Track B enforcement works in CI.
+- **PROBE_POLICY_REACH: no allowManagedHooksOnly marker** — the org hook-blocking policy does NOT reach the runner. Smoking gun: CI `policy-limits.json` shows `"kind":"token"` vs the machine's `"kind":"org"`. **Policy follows the interactive org login, not the OAuth-token principal.** CI is clean.
 
-## CI probe design (spike — build in the fresh session, don't re-derive)
+**Conclusion: Track B is viable on-desk AND in CI. No blocker remains.**
+
+**Cleanup owed (spike hygiene):** `ci-probe.yml` is throwaway and still on `main` — remove it (PR→verify→merge) as an early Plan 2 task, or leave it (dispatch-only, harmless) if you want to re-run.
+
+## CI probe design (DONE — see "CI probe — DONE" above for results; kept for reference)
 Throwaway `workflow_dispatch`-only workflow that installs `claude` CLI + `claude-agent-sdk`, runs ~10 lines of `query()` with a programmatic `PreToolUse` deny over a fixed prompt, prints: auth status, whether the deny fired, whether the call completed.
 - Reads `CLAUDE_CODE_OAUTH_TOKEN` from the repo secret.
 - **`workflow_dispatch` only — no `pull_request_target`, no PR-authored code checkout in the token job** (public repo, subscription credential).
@@ -41,6 +48,6 @@ Throwaway `workflow_dispatch`-only workflow that installs `claude` CLI + `claude
 - **Track B usage = substantial** AND **must be CI-runnable** (user requirement) — "runs in CI" is a first-class Track B design constraint, not an afterthought. A negative on the policy-reach probe reshapes the CI story (but not the on-desk story — SDK deny is already proven locally).
 - **Track A** (measurement re-baseline on the fixed tool + reporting) likely ships before Track B — measure before enforce.
 - **Small task — subprocess-test fix:** apply the verified `stdin=subprocess.DEVNULL` fix (5 files, above). Do early so the suite is green before Track B adds `ccgate run` entry-point tests.
-- **CI probe (spike):** build the `workflow_dispatch` probe (design above) once `CLAUDE_CODE_OAUTH_TOKEN` is set; answers auth / policy-reach / egress.
+- **CI probe (spike): DONE** — Track B viable in CI (auth/egress OK, SDK hook enforces, org policy doesn't reach the runner). Remaining: remove the throwaway `ci-probe.yml` from main.
 - **Deferred Ruling-2 residue:** the CI PII gate (`verify.yml`) is already live — done.
 - **Execution constraint:** the AGENT (this tool + its subagents) cannot run the full pytest suite or subprocess/entry-point tests to green — `DuplicateHandle` in the agent's process chain, and the cumulative fd-0 bug. Full-suite and `ccgate run` integration verification must run in the **user's terminal or CI**. State this in the Plan 2 plan, not per-task. (Individual in-process tests DO run via the agent.)
