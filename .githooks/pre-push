@@ -1,37 +1,112 @@
-#!/usr/bin/env bash
-# .githooks/pre-push
-# Blocks annotated tags whose tagger line or message body contains a restricted
-# identifier.  Lightweight tags are skipped — they carry no separate identity
-# metadata; the underlying commit was already checked at commit time.
+#!/bin/sh
+# Final client-side gate before anything leaves the machine. For each ref being
+# pushed it blocks a restricted identifier found in:
+#   - an annotated tag object (tagger name/email + message body), OR
+#   - the pushed commit range: author/committer identity, commit message bodies,
+#     AND the file content of the pushed tip tree (.githooks/ excluded).
+# This is the guaranteed gate for `git tag -a` (no native pre-tag hook) and the
+# backstop for commits whose messages/content skipped commit-msg/pre-commit
+# (e.g. rebase-picked, imported, or committed before the hooks/.blocked existed).
 #
-# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Note: it scans the pushed TIP tree for content, not every intermediate blob in
+# the range. Content that was added then removed within the range is not caught
+# here — rewrite history to purge that.
+#
+# Real patterns live in .githooks/.blocked (gitignored); absent => skip.
+#
+# Activate with: git config core.hooksPath .githooks
 
-set -euo pipefail
+BLOCKED_FILE="$(git rev-parse --show-toplevel 2>/dev/null)/.githooks/.blocked"
 
-# ── Patterns (variable names are intentionally opaque) ─────────────────────────
-P1="Fred Mandap|Frederick Mandap|frederick\.mandap|thug_kcirederf"
-P2="accenture\.com|Accenture"
-_C="$P1|$P2"
+# BLOCKED_NAME_1 BLOCKED_NAME_2 BLOCKED_EMAIL BLOCKED_ORG BLOCKED_ORG_DOMAIN
 
-FAIL=0
+[ -f "$BLOCKED_FILE" ] || exit 0
 
-while read -r local_ref _ remote_ref _; do
-  [[ "$local_ref" == "(delete)" ]] && continue
-  [[ "$remote_ref" != refs/tags/* ]] && continue
+FORBIDDEN=""
+while IFS= read -r line; do
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$line" in
+        ''|\#*) continue ;;
+    esac
+    if [ -z "$FORBIDDEN" ]; then
+        FORBIDDEN="$line"
+    else
+        FORBIDDEN="$FORBIDDEN|$line"
+    fi
+done < "$BLOCKED_FILE"
 
-  tag_name="${remote_ref#refs/tags/}"
+[ -z "$FORBIDDEN" ] && exit 0
 
-  obj_type=$(git cat-file -t "$local_ref" 2>/dev/null) || continue
-  [[ "$obj_type" != "tag" ]] && continue
+printf '' | grep -qE "$FORBIDDEN" 2>/dev/null
+if [ "$?" -ge 2 ]; then
+    echo "[pre-push] WARNING: .githooks/.blocked has an invalid pattern — check skipped." >&2
+    exit 0
+fi
 
-  tag_content=$(git cat-file tag "$local_ref" 2>/dev/null) || continue
+ZERO="0000000000000000000000000000000000000000"
+FAILED=0
 
-  if printf '%s' "$tag_content" | grep -qiE "$_C"; then
-    printf '[pre-push] BLOCKED: annotated tag %q contains a restricted identifier.\n' "$tag_name" >&2
-    printf '  Fix: git tag -d %q\n' "$tag_name" >&2
-    printf '       (verify a clean identity, then recreate the tag)\n' >&2
-    FAIL=1
-  fi
+# stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$ZERO" ] && continue  # deletes
+
+    # Ref name itself (branch/tag) — a name like "frederick-fix" leaks the
+    # identifier into the remote even when every commit and file is clean.
+    ref_name=$(printf '%s' "$remote_ref" | sed 's|^refs/[^/]*/||')
+    if printf '%s' "$ref_name" | grep -iqE "$FORBIDDEN"; then
+        echo "[pre-push] BLOCKED: pushed ref name contains a restricted identifier." >&2
+        printf '  Ref: %s\n' "$remote_ref" >&2
+        echo "  Rename the branch/tag with a clean name, then retry." >&2
+        FAILED=1
+    fi
+
+    obj_type=$(git cat-file -t "$local_sha" 2>/dev/null)
+
+    if [ "$obj_type" = "tag" ]; then
+        raw_tag=$(git cat-file tag "$local_sha" 2>/dev/null)
+        if printf '%s' "$raw_tag" | grep -iqE "$FORBIDDEN"; then
+            echo "[pre-push] BLOCKED: annotated tag contains a restricted identifier." >&2
+            printf '  Tag ref: %s\n' "$remote_ref" >&2
+            tag_name=$(printf '%s' "$remote_ref" | sed 's|refs/tags/||')
+            echo "  Delete and recreate with a clean identity:" >&2
+            printf '    git tag -d %s\n' "$tag_name" >&2
+            printf '    git config user.name  "Developer"\n' >&2
+            printf '    git config user.email "you@users.noreply.github.com"\n' >&2
+            printf '    git tag -a %s -m "message"\n' "$tag_name" >&2
+            FAILED=1
+        fi
+        continue
+    fi
+
+    if [ "$remote_sha" = "$ZERO" ]; then
+        commit_range="$local_sha"
+    else
+        commit_range="${remote_sha}..${local_sha}"
+    fi
+
+    # Identity (author/committer) across the pushed range.
+    bad=$(git log --format="%H  author: %an <%ae>  committer: %cn <%ce>" \
+            "$commit_range" 2>/dev/null | grep -iE "$FORBIDDEN")
+    if [ -n "$bad" ]; then
+        echo "[pre-push] BLOCKED: pushed commits contain a restricted identifier in author/committer identity:" >&2
+        printf '%s\n' "$bad" | while IFS= read -r entry; do printf '  %s\n' "$entry" >&2; done
+        echo "  Rewrite history with a clean identity, then retry." >&2
+        FAILED=1
+    fi
+
+    # Commit message bodies across the pushed range.
+    if git log --format="%B" "$commit_range" 2>/dev/null | grep -iqE "$FORBIDDEN"; then
+        echo "[pre-push] BLOCKED: a pushed commit message contains a restricted identifier." >&2
+        echo "  Reword the offending commit(s), then retry." >&2
+        FAILED=1
+    fi
+
+    # File content of the pushed TIP tree (.githooks/ excluded).
+    if git grep -iqE "$FORBIDDEN" "$local_sha" -- ':!.githooks' 2>/dev/null; then
+        echo "[pre-push] BLOCKED: pushed file content contains a restricted identifier (tip $local_ref)." >&2
+        echo "  Find it: git grep -inE '<pattern>' $local_sha -- ':!.githooks'" >&2
+        FAILED=1
+    fi
 done
 
-[[ $FAIL -eq 0 ]] || exit 1
+exit $FAILED
