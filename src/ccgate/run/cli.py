@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -20,7 +21,10 @@ def _build_options(patterns, enforce: bool):
     return {
         "hooks": {"PreToolUse": hooks_list},
         "setting_sources": [],
-        "allowed_tools": ["Read", "Bash", "Glob", "Grep"],
+        # B0 grants only Read: the deny under test is Read-scoped, and withholding Bash/Grep
+        # removes the non-Read route to a .contextignore'd file (keeps the proof deterministic).
+        # B1 broadens tools and extends enforcement (Bash rewrite) to match.
+        "allowed_tools": ["Read"],
     }
 
 
@@ -69,7 +73,14 @@ def main(argv: list[str] | None = None) -> None:
     if not args.task.exists():
         print(f"ccgate run: task file not found: {args.task}", file=sys.stderr)
         sys.exit(1)
-    prompt = args.task.read_text(encoding="utf-8")
+    try:
+        prompt = args.task.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"ccgate run: cannot read task file {args.task}: {e}", file=sys.stderr)
+        sys.exit(1)
+    if importlib.util.find_spec("claude_agent_sdk") is None:
+        print("ccgate run requires the 'run' extra: pip install -e '.[run]'", file=sys.stderr)
+        sys.exit(1)
     path = asyncio.run(run_task(prompt, enforce=not args.no_enforce, cwd=Path.cwd(),
                                 client_factory=_factory))
     print(f"run record: {path}")

@@ -60,6 +60,39 @@ def test_missing_task_file_exits_nonzero(tmp_path, capsys):
     assert "not found" in capsys.readouterr().err
 
 
+def test_allowed_tools_restricted_to_read_in_b0():
+    """B0 grants only Read — no Bash/Grep bypass around the .contextignore deny (review #3)."""
+    from ccgate.run.cli import _build_options
+    assert _build_options([], enforce=True)["allowed_tools"] == ["Read"]
+
+
+def test_missing_sdk_gives_clean_error(tmp_path, monkeypatch, capsys):
+    """Without the 'run' extra, `ccgate run` exits cleanly, not with a traceback (review #2)."""
+    import importlib.util as iu
+    from ccgate.run import cli
+    task = tmp_path / "t.txt"
+    task.write_text("do it", encoding="utf-8")
+    monkeypatch.setattr(cli.importlib.util, "find_spec",
+                        lambda n: None if n == "claude_agent_sdk" else iu.find_spec(n))
+    monkeypatch.setattr(cli.asyncio, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not reach run")))
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["--task", str(task)])
+    assert ei.value.code == 1
+    assert "run" in capsys.readouterr().err.lower()
+
+
+def test_unreadable_task_dir_exits_cleanly(tmp_path, capsys):
+    """--task pointing at a directory (unreadable) → clean exit, not a traceback (review #4)."""
+    from ccgate.run.cli import main
+    d = tmp_path / "adir"
+    d.mkdir()
+    with pytest.raises(SystemExit) as ei:
+        main(["--task", str(d)])
+    assert ei.value.code == 1
+    assert "task" in capsys.readouterr().err.lower()
+
+
 def _sdk_installed():
     import importlib.util
     return importlib.util.find_spec("claude_agent_sdk") is not None
