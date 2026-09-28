@@ -79,7 +79,7 @@ python -m pytest -q
 ```
 Expected: `27 failed` → `0 failed` (all pass), ~6 min. **Paste the actual final summary line** (e.g. `NNN passed in MMs`) into this plan's evidence log below. **No task after this one starts until that green output is recorded.**
 
-Evidence log (fill in): `__________________________________________________`
+Evidence log: `341 passed in 198.30s (0:03:18)` — user terminal, 2026-09-28. 27→0 confirmed; fd-0 fix holds under full collection.
 
 - [ ] **Step 6: Commit**
 
@@ -741,7 +741,7 @@ From `track-a-report.json`, check against `docs/baseline-2026-09-27-fixed.md`:
 unlike the Layer-1 fixture, which must match exactly. Large divergence means the
 summation path regressed.)
 
-Evidence log (fill in): `total_misses=____  main=____  subagent=____  cache_read_rate=____  hit_ratio=____`
+Evidence log (user terminal, 2026-09-28, corpus grown to 117,831 requests): `total_misses=12003  main=2915  subagent=9088  cache_read_rate=0.965173  hit_ratio=0.898134`. Reproduces baseline-2026-09-27-fixed within corpus-growth drift (all figures up slightly and proportionally; main misses ≈61/1k vs baseline 62/1k). Summation path sound. D4 now surfaces skillListing headroom (~56,396 chars vs 8,000 budget) — cwd fix confirmed working in production.
 
 - [ ] **Step 3: Record the outcome in the plan and finish**
 
