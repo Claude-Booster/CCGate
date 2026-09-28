@@ -404,7 +404,200 @@ git commit -m "feat(run): append-per-turn recorder + terminal marker + completen
 
 ---
 
-### Task 5: Optional `run` extra + `dispatch` wiring (lazy import)
+### Task 5: `cli.py` orchestrator + fake-client end-to-end test
+
+**Files:**
+- Create: `src/ccgate/run/cli.py`
+- Test: `tests/test_run_cli.py`
+
+**Interfaces:**
+- Consumes: `policy.load_contextignore`, `policy.make_read_deny_hook`, `record.RunRecorder`, `record.make_run_id`.
+- Produces: `async run_task(task_prompt, *, enforce, cwd, client_factory, options_builder=_build_options) -> Path`; `main(argv) -> None` (parses `--task`, `--no-enforce`); `_build_options(patterns, enforce) -> dict`; `_factory(options)` (real-SDK translation, built in `main`).
+
+- [ ] **Step 1: Write the failing test (fake client captures options; asserts record + enforce wiring)**
+
+```python
+import asyncio
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+
+from ccgate.run.cli import run_task
+
+
+@dataclass
+class _FakeAssistant:
+    model: str
+    usage: dict
+    content: list = None
+
+
+class _FakeClient:
+    """Stands in for ClaudeSDKClient: records the options it was built with, yields one turn."""
+    last_options = None
+
+    def __init__(self, options=None):
+        _FakeClient.last_options = options
+
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): return False
+    async def query(self, prompt): self._prompt = prompt
+
+    async def receive_response(self):
+        yield _FakeAssistant("claude-opus-4-8",
+                             {"input_tokens": 2, "cache_read_input_tokens": 8,
+                              "cache_creation_input_tokens": 0, "output_tokens": 1})
+
+
+def test_enforced_run_wires_hook_and_writes_record(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    (tmp_path / ".contextignore").write_text("secrets/*.txt\n", encoding="utf-8")
+    path = asyncio.run(run_task("do the task", enforce=True, cwd=tmp_path,
+                                client_factory=_FakeClient))
+    opts = _FakeClient.last_options
+    assert opts["setting_sources"] == []
+    assert "Read" in opts["allowed_tools"]
+    assert opts["hooks"]["PreToolUse"]           # hook present when enforcing
+    lines = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines()]
+    assert lines[0]["message"]["model"] == "claude-opus-4-8"
+    assert lines[-1]["type"] == "ccgate_run_end"
+
+
+def test_no_enforce_omits_hook(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    asyncio.run(run_task("do the task", enforce=False, cwd=tmp_path, client_factory=_FakeClient))
+    assert not _FakeClient.last_options["hooks"]["PreToolUse"]   # empty → no enforcement
+
+
+def test_missing_task_file_exits_nonzero(tmp_path, capsys):
+    import pytest
+    from ccgate.run.cli import main
+    with pytest.raises(SystemExit) as ei:
+        main(["--task", str(tmp_path / "nope.txt")])
+    assert ei.value.code == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def _sdk_installed():
+    import importlib.util
+    return importlib.util.find_spec("claude_agent_sdk") is not None
+
+
+@pytest.mark.skipif(not _sdk_installed(), reason="claude-agent-sdk not installed")
+def test_factory_builds_real_sdk_options():
+    """The translation seam (raw dict -> ClaudeAgentOptions/HookMatcher) must not drift from the
+    SDK signatures. Constructing options needs no auth/network — catch drift here, not in CI."""
+    from ccgate.run.cli import _build_options, _factory
+    # Both enforce states must build a real client without raising:
+    assert _factory(_build_options(["secrets/*.txt"], enforce=True)) is not None
+    assert _factory(_build_options([], enforce=False)) is not None
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `python -m pytest tests/test_run_cli.py -q`
+Expected: FAIL — `ModuleNotFoundError: No module named 'ccgate.run.cli'`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `src/ccgate/run/cli.py`:
+
+```python
+"""cli.py — `ccgate run`: ccgate-owned ClaudeSDKClient loop (Track B B0)."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+from pathlib import Path
+
+from ccgate.run.policy import load_contextignore, make_read_deny_hook
+from ccgate.run.record import RunRecorder, make_run_id
+
+
+def _build_options(patterns, enforce: bool):
+    """Dict-like config the client_factory consumes. NO SDK import here — keeps run_task
+    and the in-process fake-client tests SDK-free. PreToolUse holds the RAW async callback;
+    main()'s real factory wraps it in a HookMatcher (spec §7 / Task 6 note)."""
+    hooks_list = []
+    if enforce:
+        hooks_list = [make_read_deny_hook(patterns)]   # raw callback; wrapped for the real SDK in _factory
+    return {
+        "hooks": {"PreToolUse": hooks_list},
+        "setting_sources": [],
+        "allowed_tools": ["Read", "Bash", "Glob", "Grep"],
+    }
+
+
+def _factory(options):
+    """Real-SDK client factory: translate the raw-callback dict → ClaudeAgentOptions/HookMatcher.
+    All SDK imports are confined here so run_task/_build_options stay SDK-free and testable."""
+    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
+    raw = options["hooks"]["PreToolUse"]
+    hooks = {"PreToolUse": [HookMatcher(matcher="Read", hooks=raw)]} if raw else {}
+    return ClaudeSDKClient(options=ClaudeAgentOptions(
+        hooks=hooks,
+        setting_sources=options["setting_sources"],
+        allowed_tools=options["allowed_tools"],
+    ))
+
+
+async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory,
+                   options_builder=_build_options) -> Path:
+    patterns = load_contextignore(cwd)
+    options = options_builder(patterns, enforce)
+    recorder = RunRecorder(make_run_id(str(cwd)))
+    try:
+        async with client_factory(options=options) as client:
+            await client.query(task_prompt)
+            async for msg in client.receive_response():
+                model = getattr(msg, "model", None)
+                usage = getattr(msg, "usage", None)
+                if model is not None and usage is not None:
+                    recorder.append_assistant(model, usage)
+                    print(f"[turn] {model}")
+        recorder.finish()
+    except Exception:
+        # append-per-turn already persisted completed turns; absence of marker = incomplete
+        raise
+    return recorder.path
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="ccgate run")
+    parser.add_argument("--task", required=True, type=Path, help="File containing the task prompt")
+    parser.add_argument("--no-enforce", action="store_true",
+                        help="MEASUREMENT BASELINE ONLY: omit enforcement — the agent will "
+                             "genuinely perform reads that enforcement would deny. Not a safe default.")
+    args = parser.parse_args(argv)
+    if not args.task.exists():
+        print(f"ccgate run: task file not found: {args.task}", file=sys.stderr)
+        sys.exit(1)
+    prompt = args.task.read_text(encoding="utf-8")
+    path = asyncio.run(run_task(prompt, enforce=not args.no_enforce, cwd=Path.cwd(),
+                                client_factory=_factory))
+    print(f"run record: {path}")
+```
+
+> **Note for the implementer:** `_build_options` returns a plain dict with the **raw async callback** under `PreToolUse` and imports no SDK — that keeps `run_task` and its fake-client tests runnable without `claude-agent-sdk` installed. The module-level `_factory` is the only place that imports the SDK; it wraps the raw callback in `HookMatcher(matcher="Read", ...)`. `test_factory_builds_real_sdk_options` exercises `_factory` directly (SDK-gated) so signature drift is caught locally, not in CI; if a keyword differs, fix it in `_factory` only, never in the dict `run_task` asserts on.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `python -m pytest tests/test_run_cli.py -q`
+Expected: PASS — `test_enforced_run_wires_hook_and_writes_record`, `test_no_enforce_omits_hook`, `test_missing_task_file_exits_nonzero`, and (if the SDK is installed) `test_factory_builds_real_sdk_options`; otherwise the last is skipped.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/ccgate/run/cli.py tests/test_run_cli.py
+git commit -m "feat(run): cli orchestrator with injectable client (fake-tested end-to-end)"
+```
+
+---
+
+### Task 6: Optional `run` extra + `dispatch` wiring (lazy import)
 
 **Files:**
 - Modify: `pyproject.toml`
@@ -412,6 +605,7 @@ git commit -m "feat(run): append-per-turn recorder + terminal marker + completen
 - Test: `tests/test_run_dispatch.py`
 
 **Interfaces:**
+- Consumes: `ccgate.run.cli.main` (Task 5).
 - Produces: `ccgate run ...` routes to `ccgate.run.cli.main(args)`; a clear error if `claude-agent-sdk` is not installed.
 
 - [ ] **Step 1: Write the failing test**
@@ -477,190 +671,13 @@ And add to `_usage()`'s subcommands block:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_run_dispatch.py -q`
-Expected: PASS. (`run` shows in usage; unknown subcommand still exits 1. The lazy import means this passes even before `cli.py` exists only if `cli.py` is present — so this task lands after Task 6 imports resolve; see note.)
-
-> **Sequencing note:** `from ccgate.run.cli import main` requires Task 6's `cli.py`. Implement Task 6 before running Step 4 here, or stub `cli.main` first. Recommended: do Task 6, then this Step 4. The commit for this task may follow Task 6's.
+Expected: PASS — `run` shows in usage; unknown subcommand still exits 1. (`cli.py` already exists from Task 5, so the lazy import resolves.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml src/ccgate/dispatch.py tests/test_run_dispatch.py
 git commit -m "feat(run): optional run extra + dispatch wiring (lazy import)"
-```
-
----
-
-### Task 6: `cli.py` orchestrator + fake-client end-to-end test
-
-**Files:**
-- Create: `src/ccgate/run/cli.py`
-- Test: `tests/test_run_cli.py`
-
-**Interfaces:**
-- Consumes: `policy.load_contextignore`, `policy.make_read_deny_hook`, `record.RunRecorder`, `record.make_run_id`.
-- Produces: `async run_task(task_prompt, *, enforce, cwd, client_factory, options_sink=None) -> Path`; `main(argv) -> None` (parses `--task`, `--no-enforce`).
-
-- [ ] **Step 1: Write the failing test (fake client captures options; asserts record + enforce wiring)**
-
-```python
-import asyncio
-import json
-from dataclasses import dataclass
-from pathlib import Path
-
-from ccgate.run.cli import run_task
-
-
-@dataclass
-class _FakeAssistant:
-    model: str
-    usage: dict
-    content: list = None
-
-
-class _FakeClient:
-    """Stands in for ClaudeSDKClient: records the options it was built with, yields one turn."""
-    last_options = None
-
-    def __init__(self, options=None):
-        _FakeClient.last_options = options
-
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
-    async def query(self, prompt): self._prompt = prompt
-
-    async def receive_response(self):
-        yield _FakeAssistant("claude-opus-4-8",
-                             {"input_tokens": 2, "cache_read_input_tokens": 8,
-                              "cache_creation_input_tokens": 0, "output_tokens": 1})
-
-
-def test_enforced_run_wires_hook_and_writes_record(tmp_path, monkeypatch):
-    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    (tmp_path / ".contextignore").write_text("secrets/*.txt\n", encoding="utf-8")
-    path = asyncio.run(run_task("do the task", enforce=True, cwd=tmp_path,
-                                client_factory=_FakeClient))
-    opts = _FakeClient.last_options
-    assert opts["setting_sources"] == []
-    assert "Read" in opts["allowed_tools"]
-    assert opts["hooks"]["PreToolUse"]           # hook present when enforcing
-    lines = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines()]
-    assert lines[0]["message"]["model"] == "claude-opus-4-8"
-    assert lines[-1]["type"] == "ccgate_run_end"
-
-
-def test_no_enforce_omits_hook(tmp_path, monkeypatch):
-    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    asyncio.run(run_task("do the task", enforce=False, cwd=tmp_path, client_factory=_FakeClient))
-    assert not _FakeClient.last_options["hooks"]["PreToolUse"]   # empty → no enforcement
-
-
-def test_missing_task_file_exits_nonzero(tmp_path, capsys):
-    import pytest
-    from ccgate.run.cli import main
-    with pytest.raises(SystemExit) as ei:
-        main(["--task", str(tmp_path / "nope.txt")])
-    assert ei.value.code == 1
-    assert "not found" in capsys.readouterr().err
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `python -m pytest tests/test_run_cli.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'ccgate.run.cli'`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-Create `src/ccgate/run/cli.py`:
-
-```python
-"""cli.py — `ccgate run`: ccgate-owned ClaudeSDKClient loop (Track B B0)."""
-from __future__ import annotations
-
-import argparse
-import asyncio
-import sys
-from pathlib import Path
-
-from ccgate.run.policy import load_contextignore, make_read_deny_hook
-from ccgate.run.record import RunRecorder, make_run_id
-
-
-def _build_options(patterns, enforce: bool):
-    """Dict-like config the client_factory consumes. NO SDK import here — keeps run_task
-    and the in-process fake-client tests SDK-free. PreToolUse holds the RAW async callback;
-    main()'s real factory wraps it in a HookMatcher (spec §7 / Task 6 note)."""
-    hooks_list = []
-    if enforce:
-        hooks_list = [make_read_deny_hook(patterns)]   # raw callback; wrapped for the real SDK in _factory
-    return {
-        "hooks": {"PreToolUse": hooks_list},
-        "setting_sources": [],
-        "allowed_tools": ["Read", "Bash", "Glob", "Grep"],
-    }
-
-
-async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory,
-                   options_builder=_build_options) -> Path:
-    patterns = load_contextignore(cwd)
-    options = options_builder(patterns, enforce)
-    recorder = RunRecorder(make_run_id(str(cwd)))
-    try:
-        async with client_factory(options=options) as client:
-            await client.query(task_prompt)
-            async for msg in client.receive_response():
-                model = getattr(msg, "model", None)
-                usage = getattr(msg, "usage", None)
-                if model is not None and usage is not None:
-                    recorder.append_assistant(model, usage)
-                    print(f"[turn] {model}")
-        recorder.finish()
-    except Exception:
-        # append-per-turn already persisted completed turns; absence of marker = incomplete
-        raise
-    return recorder.path
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="ccgate run")
-    parser.add_argument("--task", required=True, type=Path, help="File containing the task prompt")
-    parser.add_argument("--no-enforce", action="store_true",
-                        help="MEASUREMENT BASELINE ONLY: omit enforcement — the agent will "
-                             "genuinely perform reads that enforcement would deny. Not a safe default.")
-    args = parser.parse_args(argv)
-    if not args.task.exists():
-        print(f"ccgate run: task file not found: {args.task}", file=sys.stderr)
-        sys.exit(1)
-    prompt = args.task.read_text(encoding="utf-8")
-
-    def _factory(options):
-        # All SDK imports confined here (the real path); translate raw callbacks → HookMatcher.
-        from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
-        raw = options["hooks"]["PreToolUse"]
-        hooks = {"PreToolUse": [HookMatcher(matcher="Read", hooks=raw)]} if raw else {}
-        return ClaudeSDKClient(options=ClaudeAgentOptions(
-            hooks=hooks,
-            setting_sources=options["setting_sources"],
-            allowed_tools=options["allowed_tools"],
-        ))
-
-    path = asyncio.run(run_task(prompt, enforce=not args.no_enforce, cwd=Path.cwd(),
-                                client_factory=_factory))
-    print(f"run record: {path}")
-```
-
-> **Note for the implementer:** `_build_options` returns a plain dict with the **raw async callback** under `PreToolUse` and imports no SDK — that keeps `run_task` and its fake-client tests runnable without `claude-agent-sdk` installed. Only `main()`'s `_factory` imports the SDK and wraps the raw callback in `HookMatcher(matcher="Read", ...)`. Verify `ClaudeAgentOptions`/`HookMatcher` accept these keyword args against the installed SDK (Task 7's CI run is the real check); if a name differs, fix it in `_factory`, never in the dict `run_task` asserts on.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `python -m pytest tests/test_run_cli.py -q`
-Expected: PASS (2 tests). Then run Task 5's Step 4 (`tests/test_run_dispatch.py`) now that `cli.py` exists.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/ccgate/run/cli.py tests/test_run_cli.py
-git commit -m "feat(run): cli orchestrator with injectable client (fake-tested end-to-end)"
 ```
 
 ---
@@ -772,4 +789,8 @@ Evidence log (fill in): `PROBE_RED_READ_HAPPENED=____  PROBE_GREEN_READ_DENIED=_
 
 ## Sequencing note
 
-Tasks 1–4 and 6 are agent-runnable in-process (TDD, fake client). Task 5's Step 4 depends on Task 6's `cli.py` (see its note) — implement Task 6 before Task 5's verification, commit order 1→2→3→4→6→5→7. Task 7 is the only real-SDK verification and runs in CI / the user's terminal.
+Tasks 1–6 run in strict numeric order (1→2→3→4→5→6→7) — file order now matches execution
+order, no out-of-order steps. Tasks 1–5 are agent-runnable in-process (TDD; pure units +
+fake client; `test_factory_builds_real_sdk_options` runs too when the SDK is pip-installed,
+else skips). Task 6 (dispatch) depends on Task 5's `cli.py`, which precedes it. Task 7 is the
+only real-SDK verification and runs in CI / the user's terminal.
