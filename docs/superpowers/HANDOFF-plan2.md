@@ -19,9 +19,15 @@ spec docs below, then start with the two blockers, then Plan 2 brainstorming.
 **Working:** transcript JSONL read (~15s lag, ground-truth `usage`); MCP servers (own tools only, can't observe other tools); git hooks (PII scanner); `permissions` allow/deny; skills + `ccgate` CLI; **Agent SDK programmatic hooks — verified: a `PreToolUse` deny held** (Track B's load-bearing fact; does NOT depend on CI).
 **Unverified (the CI probe answers these):** does the org policy reach a CI runner; auth via `CLAUDE_CODE_OAUTH_TOKEN`; egress.
 
-## Two blockers (yours, before Plan 2 brainstorming is worth its cost)
-1. **Run `python -m pytest -q` in your own terminal**, paste the tail. Settles whether the 25 CLI-dispatch/subprocess tests pass on your machine (they fail via the agent Bash tool with `WinError 6 DuplicateHandle` regardless of sandbox — unprovable from the agent side). These are the exact spawn path `ccgate run` uses; if they fail for you too, Track B's entry point is broken before it's written. (Next time repro with ONE test, not the suite — the last full run took 3.5h.)
-2. **Set `CLAUDE_CODE_OAUTH_TOKEN`** (from `claude setup-token`) as a repo secret on `Claude-Booster/CCGate`. NOT an API key — the managed corporate account does not provide `ANTHROPIC_API_KEY`; single-user automation via the OAuth token is the permitted path.
+## Subprocess-test failures — RESOLVED (2026-09-28), Track B NOT blocked
+Ran on the user's terminal: 27 failed (`WinError 6 DuplicateHandle`), reproduces there too. Root-caused via systematic-debugging:
+- Raw subprocess works outside pytest; single subprocess tests pass in isolation; collect-all + run-one fails → cumulative contamination.
+- Bisected to the hook-test cluster (test_pre_tool + test_session_end + test_session_start): none alone, together they tip fd 0's handle invalid → later `subprocess.run` (inheriting fd 0) fails at DuplicateHandle. The 2 ccgate source `open()` sites are properly closed → pytest capfd fd-hygiene, NOT a product leak.
+- **Track B (`ccgate run`) spawn path is UNAFFECTED** — SDK spawns the CLI fine; runtime subprocess works. This is a pytest-suite-only bug.
+- **VERIFIED FIX (Plan 2 task):** add `stdin=subprocess.DEVNULL` to the subprocess helpers in `test_baseline`, `test_digest`, `test_miss_audit_g4g5`, `test_otel_reader`, `test_since_filter` (confirmed: makes the failing test pass in the full-collection context). Small, mechanical. After applying, verify the full green suite in the user's terminal (~6min there; 20+min via agent — don't).
+
+## One blocker (yours, before the CI probe)
+- **Set `CLAUDE_CODE_OAUTH_TOKEN`** (from `claude setup-token`) as a repo secret on `Claude-Booster/CCGate`. NOT an API key — the managed corporate account does not provide `ANTHROPIC_API_KEY`; single-user automation via the OAuth token is the permitted path.
 
 ## CI probe design (spike — build in the fresh session, don't re-derive)
 Throwaway `workflow_dispatch`-only workflow that installs `claude` CLI + `claude-agent-sdk`, runs ~10 lines of `query()` with a programmatic `PreToolUse` deny over a fixed prompt, prints: auth status, whether the deny fired, whether the call completed.
@@ -34,5 +40,7 @@ Throwaway `workflow_dispatch`-only workflow that installs `claude` CLI + `claude
 ## Plan 2 scope (brainstorm opens here)
 - **Track B usage = substantial** AND **must be CI-runnable** (user requirement) — "runs in CI" is a first-class Track B design constraint, not an afterthought. A negative on the policy-reach probe reshapes the CI story (but not the on-desk story — SDK deny is already proven locally).
 - **Track A** (measurement re-baseline on the fixed tool + reporting) likely ships before Track B — measure before enforce.
+- **Small task — subprocess-test fix:** apply the verified `stdin=subprocess.DEVNULL` fix (5 files, above). Do early so the suite is green before Track B adds `ccgate run` entry-point tests.
+- **CI probe (spike):** build the `workflow_dispatch` probe (design above) once `CLAUDE_CODE_OAUTH_TOKEN` is set; answers auth / policy-reach / egress.
 - **Deferred Ruling-2 residue:** the CI PII gate (`verify.yml`) is already live — done.
-- **Execution constraint:** Track B's spawn/entry-point integration tests CANNOT run through the agent or subagents (DuplicateHandle). They must run in the user's terminal or CI. State this in the Plan 2 plan, not per-task.
+- **Execution constraint:** the AGENT (this tool + its subagents) cannot run the full pytest suite or subprocess/entry-point tests to green — `DuplicateHandle` in the agent's process chain, and the cumulative fd-0 bug. Full-suite and `ccgate run` integration verification must run in the **user's terminal or CI**. State this in the Plan 2 plan, not per-task. (Individual in-process tests DO run via the agent.)
