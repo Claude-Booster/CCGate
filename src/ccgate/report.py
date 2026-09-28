@@ -4,8 +4,9 @@ Pure functions. ledger.py (Track B's net model) is intentionally untouched.
 """
 from __future__ import annotations
 
-# D4 / ELIMINATE-headroom checks that run_shape actually emits today. bashOutputMaxChars
-# (_check_output_caps) is a Phase-0 stub returning [], so it is not listed until it emits.
+# D4 / ELIMINATE-headroom checks that run_shape actually emits today. The outputCaps
+# check (_check_output_caps) is a Phase-0 stub returning [], so it is not listed until
+# it emits.
 _D4_CHECKS = frozenset({"claudeMdLines", "claudeMdExcludes", "skillListing", "denyReads"})
 
 
@@ -73,7 +74,7 @@ def render_report(summary: dict, ledger: dict) -> str:
 
     Does not overstate live ELIMINATE: A1 is applied, A3 absent, D4 unapplied (spec §4).
     """
-    s, by, t = summary, summary["by_origin"], summary["tokens"]
+    s, by = summary, summary["by_origin"]
     prevented = ledger["tokens_prevented"]
     lines: list[str] = []
 

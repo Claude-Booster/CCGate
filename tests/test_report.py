@@ -147,6 +147,14 @@ def test_report_flag_json_has_ledger(capsys, monkeypatch):
     assert payload["summary"]["total_misses"] == 2
 
 
+def test_plain_audit_path_runs_bound_guard(capsys, monkeypatch):
+    """assert_bounds guards the plain `audit` path too — the defect's original home."""
+    calls = []
+    monkeypatch.setattr("ccgate.report.assert_bounds", lambda s: calls.append(s))
+    miss_audit.main(_PATHS)  # no --report
+    assert calls and calls[0]["total_misses"] == 2
+
+
 def test_report_passes_project_cwd_to_run_shape(monkeypatch, capsys):
     """D4 headroom is project-scoped: run_shape must be called with a real cwd, not None,
     or denyReads/claudeMdExcludes silently return []."""
