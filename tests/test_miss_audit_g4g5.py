@@ -20,6 +20,7 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         [PYTHON, "-m", "ccgate.scripts.miss_audit", *args],
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
         env=env,
     )
 

@@ -16,7 +16,8 @@ def _run(*args, env_extra=None):
         env.update(env_extra)
     result = subprocess.run(
         [sys.executable, "-m", "ccgate.scripts.digest", *args],
-        capture_output=True, text=True, cwd=str(WORKTREE), env=env,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        cwd=str(WORKTREE), env=env,
     )
     return result.returncode, result.stdout, result.stderr
 

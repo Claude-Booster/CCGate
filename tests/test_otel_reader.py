@@ -21,7 +21,8 @@ def _run(*args, env_extra=None):
         env.update(env_extra)
     result = subprocess.run(
         [sys.executable, "-m", "ccgate.scripts.otel_reader", *args],
-        capture_output=True, text=True, cwd=str(WORKTREE), env=env,
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        cwd=str(WORKTREE), env=env,
     )
     return result.returncode, result.stdout, result.stderr
 
@@ -179,7 +180,7 @@ def test_server_post_returns_200(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "ccgate.scripts.otel_reader", "serve", "--port", str(port)],
         env=env, cwd=str(WORKTREE),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
         _wait_for_port(port)
@@ -204,7 +205,7 @@ def test_server_bad_json_returns_400(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "ccgate.scripts.otel_reader", "serve", "--port", str(port)],
         env=env, cwd=str(WORKTREE),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
         _wait_for_port(port)
@@ -231,7 +232,7 @@ def test_server_wrong_path_returns_404(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "ccgate.scripts.otel_reader", "serve", "--port", str(port)],
         env=env, cwd=str(WORKTREE),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
         _wait_for_port(port)
