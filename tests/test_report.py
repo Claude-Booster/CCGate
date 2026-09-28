@@ -1,6 +1,13 @@
+import json as _json
+from pathlib import Path
+
 import pytest
 
 from ccgate.report import assert_bounds, compute_ledger, render_report, _D4_CHECKS
+from ccgate.scripts import miss_audit
+
+_FIX = Path(__file__).parent / "fixtures" / "track_a_report"
+_PATHS = [str(_FIX / "main.jsonl"), str(_FIX / "subagents" / "agent-1.jsonl")]
 
 VALID = {
     "total_requests": 5, "total_misses": 2, "hit_ratio": 0.6, "cache_read_rate": 0.25,
@@ -119,3 +126,26 @@ def test_render_d4_lists_findings():
     led = compute_ledger([{"check": "claudeMdExcludes", "severity": "warning"}])
     out = render_report(VALID, led)
     assert "claudeMdExcludes" in out
+
+
+def test_report_flag_human_output(capsys):
+    miss_audit.main(["--report", *_PATHS])
+    out = capsys.readouterr().out
+    assert "TRACK A — MEASUREMENT REPORT" in out
+    assert "PREVENT and RECOVER" in out
+    assert "cache-read rate: 25.0%" in out
+
+
+def test_report_flag_json_has_ledger(capsys):
+    miss_audit.main(["--report", "--json", *_PATHS])
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["ledger"]["tokens_avoided"] == 0
+    assert payload["ledger"]["tokens_prevented"]["a1"]["status"] == "unmeasurable"
+    assert payload["summary"]["total_misses"] == 2
+
+
+def test_report_flag_empty_corpus_exits_zero(capsys, monkeypatch):
+    monkeypatch.setattr(miss_audit, "find_transcripts", lambda **kw: [], raising=False)
+    with pytest.raises(SystemExit) as ei:
+        miss_audit.main(["--report", "--since", "1d"])
+    assert ei.value.code == 0

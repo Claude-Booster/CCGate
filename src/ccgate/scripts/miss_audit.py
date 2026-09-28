@@ -14,6 +14,7 @@ from ccgate.transcript import (
     Classification,
     Request,
     classify_requests,
+    find_transcripts,
     grand_total_input,
     infer_ttl_from_usage,
     read_transcript,
@@ -174,6 +175,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--session", metavar="ID")
     parser.add_argument("--since", metavar="DURATION")
     parser.add_argument("--json", action="store_true", dest="emit_json")
+    parser.add_argument("--report", action="store_true", dest="report_mode",
+                        help="Honest I7 ledger + prevention-model framing (Track A)")
     parser.add_argument("--assert", action="store_true", dest="assert_mode",
                         help="Exit 1 if avoidable misses exist")
     args = parser.parse_args(argv)
@@ -195,10 +198,8 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
 
     if not paths and args.session:
-        from ccgate.transcript import find_transcripts
         paths = find_transcripts(session_id=args.session)
     if not paths:
-        from ccgate.transcript import find_transcripts
         paths = find_transcripts(since_dt=since_dt)
 
     if not paths:
@@ -206,6 +207,18 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0)
 
     report = run_audit(paths, config)
+
+    if args.report_mode:
+        from ccgate import report as report_view
+        from ccgate.scripts.shape import run_shape
+        report_view.assert_bounds(report["summary"])   # never print an impossible figure
+        ledger = report_view.compute_ledger(run_shape())
+        if args.emit_json:
+            report["ledger"] = ledger
+            print(json.dumps(report, indent=2))
+        else:
+            print(report_view.render_report(report["summary"], ledger))
+        return
 
     if args.emit_json:
         print(json.dumps(report, indent=2))
