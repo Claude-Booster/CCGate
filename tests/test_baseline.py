@@ -13,6 +13,7 @@ def _run(*args):
         [sys.executable, "-m", "ccgate.scripts.baseline", *args],
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,   # fd-0 hygiene: do not inherit pytest's contaminated stdin
         cwd=str(WORKTREE),
         env={**__import__("os").environ, "PYTHONPATH": str(WORKTREE / "src")},
     )

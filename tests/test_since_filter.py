@@ -130,7 +130,7 @@ class TestSinceDurationParser:
         projects.mkdir(parents=True)
         return subprocess.run(
             [sys.executable, "-m", "ccgate.dispatch", "audit", "--since", since_arg],
-            capture_output=True, text=True,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
             env={**__import__("os").environ, **env_patch},
             cwd=str(Path(__file__).parent.parent),
         )
