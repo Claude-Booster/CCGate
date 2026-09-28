@@ -31,6 +31,15 @@ class TestGetCcVersion:
             result = _get_cc_version()
         assert result is None
 
+    def test_spawn_uses_devnull_stdin(self):
+        """fd-0 hygiene: the version spawn must not inherit a contaminated stdin."""
+        import subprocess as _sp
+        with patch("ccgate.scripts.shape.subprocess.run") as mock_run:
+            mock_run.return_value.stdout = "Claude Code 2.1.257 (claude-code)\n"
+            mock_run.return_value.returncode = 0
+            _get_cc_version()
+        assert mock_run.call_args.kwargs.get("stdin") is _sp.DEVNULL
+
 
 class TestIsSubscriptionAuth:
     def test_api_key_helper_is_not_subscription(self):
