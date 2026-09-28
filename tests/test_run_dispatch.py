@@ -16,7 +16,7 @@ def _run_cli(*args):
 
 def test_run_appears_in_usage():
     r = _run_cli("help")
-    assert "run" in r.stdout
+    assert "run --task" in r.stdout
 
 
 def test_unknown_subcommand_still_errors():
