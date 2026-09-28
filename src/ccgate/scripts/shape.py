@@ -210,6 +210,7 @@ def _get_cc_version() -> tuple[int, int, int] | None:
         result = subprocess.run(
             ["claude", "--version"],
             capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,   # fd-0 hygiene: never inherit a contaminated stdin
         )
         m = _re.search(r"(\d+)\.(\d+)\.(\d+)", result.stdout or result.stderr or "")
         if m:

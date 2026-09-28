@@ -128,7 +128,9 @@ def test_render_d4_lists_findings():
     assert "claudeMdExcludes" in out
 
 
-def test_report_flag_human_output(capsys):
+def test_report_flag_human_output(capsys, monkeypatch):
+    # Hermetic: don't spawn `claude --version` via run_shape under the suite (fd-0 hygiene).
+    monkeypatch.setattr("ccgate.scripts.shape.run_shape", lambda **kw: [])
     miss_audit.main(["--report", *_PATHS])
     out = capsys.readouterr().out
     assert "TRACK A — MEASUREMENT REPORT" in out
@@ -136,12 +138,27 @@ def test_report_flag_human_output(capsys):
     assert "cache-read rate: 25.0%" in out
 
 
-def test_report_flag_json_has_ledger(capsys):
+def test_report_flag_json_has_ledger(capsys, monkeypatch):
+    monkeypatch.setattr("ccgate.scripts.shape.run_shape", lambda **kw: [])
     miss_audit.main(["--report", "--json", *_PATHS])
     payload = _json.loads(capsys.readouterr().out)
     assert payload["ledger"]["tokens_avoided"] == 0
     assert payload["ledger"]["tokens_prevented"]["a1"]["status"] == "unmeasurable"
     assert payload["summary"]["total_misses"] == 2
+
+
+def test_report_passes_project_cwd_to_run_shape(monkeypatch, capsys):
+    """D4 headroom is project-scoped: run_shape must be called with a real cwd, not None,
+    or denyReads/claudeMdExcludes silently return []."""
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr("ccgate.scripts.shape.run_shape", _capture)
+    miss_audit.main(["--report", *_PATHS])
+    assert captured.get("cwd")  # truthy, not None
 
 
 def test_report_flag_empty_corpus_exits_zero(capsys, monkeypatch):

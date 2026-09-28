@@ -212,7 +212,9 @@ def main(argv: list[str] | None = None) -> None:
         from ccgate import report as report_view
         from ccgate.scripts.shape import run_shape
         report_view.assert_bounds(report["summary"])   # never print an impossible figure
-        ledger = report_view.compute_ledger(run_shape())
+        # cwd must be set: denyReads/claudeMdExcludes (project-scoped D4 headroom) return
+        # [] when cwd is None, silently hiding the highest-ROI findings the report surfaces.
+        ledger = report_view.compute_ledger(run_shape(cwd=str(Path.cwd())))
         if args.emit_json:
             report["ledger"] = ledger
             print(json.dumps(report, indent=2))
