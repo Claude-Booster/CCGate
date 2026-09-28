@@ -23,6 +23,14 @@ def main(argv: list[str] | None = None) -> None:
         from ccgate.scripts.shape import main as _main
         _main(args[1:])
 
+    elif subcmd == "run":
+        try:
+            from ccgate.run.cli import main as _main
+        except ImportError:
+            print("ccgate run requires the 'run' extra: pip install -e '.[run]'", file=sys.stderr)
+            sys.exit(1)
+        _main(args[1:])
+
     elif subcmd in ("--help", "-h", "help"):
         _usage()
 
@@ -40,6 +48,7 @@ def _usage() -> None:
         "  statusline        Read status-line JSON from stdin, write one line to stdout\n"
         "  audit [paths]     Miss-cause attribution report\n"
         "  shape             Static config and CLAUDE.md lint\n"
+        "  run --task F      Owned SDK loop with enforcement (Track B)\n"
     )
 
 
