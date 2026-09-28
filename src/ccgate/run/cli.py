@@ -45,11 +45,16 @@ async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory
     async with client_factory(options=options) as client:
         await client.query(task_prompt)
         async for msg in client.receive_response():
+            # Stream the assistant's text blocks to stdout (spec §3 streaming; the probe
+            # detects whether the read happened by the echoed content appearing here).
+            for block in (getattr(msg, "content", None) or []):
+                text = getattr(block, "text", None)
+                if text:
+                    print(text)
             model = getattr(msg, "model", None)
             usage = getattr(msg, "usage", None)
             if model is not None and usage is not None:
                 recorder.append_assistant(model, usage)
-                print(f"[turn] {model}")
     recorder.finish()
     return recorder.path
 
