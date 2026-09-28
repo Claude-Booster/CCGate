@@ -60,10 +60,14 @@ def test_missing_task_file_exits_nonzero(tmp_path, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-def test_allowed_tools_restricted_to_read_in_b0():
-    """B0 grants only Read — no Bash/Grep bypass around the .contextignore deny (review #3)."""
+def test_b0_restricts_tools_to_read():
+    """B0 grants only Read: `tools` (availability) AND allowed_tools (auto-approve) both ["Read"].
+    allowed_tools alone leaves Bash/Grep available-but-unapproved, so the model reaches for them
+    and is blocked before using Read; and it would leave a non-Read bypass of the deny (review #3)."""
     from ccgate.run.cli import _build_options
-    assert _build_options([], enforce=True)["allowed_tools"] == ["Read"]
+    opts = _build_options([], enforce=True)
+    assert opts["tools"] == ["Read"]
+    assert opts["allowed_tools"] == ["Read"]
 
 
 def test_missing_sdk_gives_clean_error(tmp_path, monkeypatch, capsys):
