@@ -1,6 +1,6 @@
 import pytest
 
-from ccgate.report import assert_bounds, compute_ledger, _D4_CHECKS
+from ccgate.report import assert_bounds, compute_ledger, render_report, _D4_CHECKS
 
 VALID = {
     "total_requests": 5, "total_misses": 2, "hit_ratio": 0.6, "cache_read_rate": 0.25,
@@ -92,3 +92,30 @@ def test_ledger_prevented_has_no_token_estimate():
     assert "value" in d4 and d4["value"] is None
     for f in d4["findings"]:
         assert "estimated_tokens" not in f
+
+
+def test_render_states_prevention_model_accurately():
+    out = render_report(VALID, compute_ledger([]))
+    assert "ELIMINATE remains available" in out
+    assert "PREVENT and RECOVER" in out
+    assert "ccgate run" in out
+
+
+def test_render_reports_zeros_and_facts():
+    out = render_report(VALID, compute_ledger([]))
+    assert "avoided" in out and "0" in out
+    assert "2" in out          # total misses
+    assert "25.0%" in out      # cache-read rate
+    assert "ccgate shape" in out   # pointer to unapplied config
+    assert "ccgate audit" in out   # pointer to cause table
+
+
+def test_render_d4_none_found():
+    out = render_report(VALID, compute_ledger([]))
+    assert "none found" in out.lower()
+
+
+def test_render_d4_lists_findings():
+    led = compute_ledger([{"check": "claudeMdExcludes", "severity": "warning"}])
+    out = render_report(VALID, led)
+    assert "claudeMdExcludes" in out

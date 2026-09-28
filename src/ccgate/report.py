@@ -66,3 +66,47 @@ def compute_ledger(shape_findings: list[dict]) -> dict:
         "tokens_injected": 0,  # interactive ccgate injects nothing (hooks blocked)
         "net": 0,              # reporter, not actor (I7)
     }
+
+
+def render_report(summary: dict, ledger: dict) -> str:
+    """Human-readable Track A report: honest ledger + accurate prevention framing.
+
+    Does not overstate live ELIMINATE: A1 is applied, A3 absent, D4 unapplied (spec §4).
+    """
+    s, by, t = summary, summary["by_origin"], summary["tokens"]
+    prevented = ledger["tokens_prevented"]
+    lines: list[str] = []
+
+    lines.append("\nTRACK A — MEASUREMENT REPORT")
+    lines.append("=" * 60)
+    lines.append(
+        "ELIMINATE remains available to interactive sessions (config savings the "
+        "org policy cannot reach). On this machine A1 (1h pin) is applied; A3's "
+        "driver is absent; the D4 items are unapplied headroom — run `ccgate shape` "
+        "to see what is not yet applied. PREVENT and RECOVER move to the owned loop "
+        "(`ccgate run`) and apply only to Track B work."
+    )
+
+    lines.append("\nI7 ledger (categories reported separately):")
+    lines.append(f"  tokens_prevented / A1: unmeasurable ({prevented['a1']['reason']})")
+    lines.append(f"  tokens_prevented / A3: 0 ({prevented['a3']['reason']})")
+    d4 = prevented["d4"]["findings"]
+    if d4:
+        lines.append("  tokens_prevented / D4: available, unapplied (no estimate) —")
+        for f in d4:
+            lines.append(f"      - {f['check']} [{f.get('severity', '?')}]")
+    else:
+        lines.append("  tokens_prevented / D4: none found")
+    lines.append(f"  tokens_avoided:  {ledger['tokens_avoided']}  (Track A denies nothing)")
+    lines.append(f"  tokens_measured: {ledger['tokens_measured']}  (no server-side delta)")
+    lines.append(f"  tokens_injected: {ledger['tokens_injected']}  (interactive injects nothing)")
+    lines.append(f"  net:             {ledger['net']}  (reporter, not actor — I7)")
+
+    lines.append("\nGround-truth facts (this corpus):")
+    lines.append(f"  total misses:    {s['total_misses']}  "
+                 f"(main {by['main']['misses']} / subagent {by['subagent']['misses']})")
+    lines.append(f"  cache-read rate: {s['cache_read_rate'] * 100:.1f}%")
+    lines.append(f"  hit ratio:       {s['hit_ratio'] * 100:.1f}%  "
+                 f"({s['total_requests'] - s['total_misses']}/{s['total_requests']})")
+    lines.append("\nRun `ccgate audit` (no --report) for the full cause-attribution table.")
+    return "\n".join(lines)
