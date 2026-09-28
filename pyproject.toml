@@ -19,3 +19,4 @@ where = ["src"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "jsonschema>=4"]
+run = ["claude-agent-sdk>=0.2.128"]
