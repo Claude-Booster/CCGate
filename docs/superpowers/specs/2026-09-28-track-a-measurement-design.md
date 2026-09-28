@@ -17,6 +17,8 @@ spec afterward, honouring the parent's "measure before enforce" sequencing.
 - A `--report` **view on the existing `ccgate audit` command** (§2): the I7 ledger
   block + the prevention-model framing (§4), over the same `run_audit` data.
 - The I7 three-category ledger reported **honestly and per-cause** (§3).
+- A **committed fixture corpus** with known-by-construction counts as the CI-runnable
+  reproduction gate (§1 Layer 1).
 - The subprocess-test fix (5 files) — **sequenced first** (§5).
 - Removal of the throwaway `ci-probe.yml` from `main` (§5).
 
@@ -26,13 +28,30 @@ spec afterward, honouring the parent's "measure before enforce" sequencing.
   concern; rewriting it to emit zeros for Track A is busywork (Approach A, §2).
 - Any fabricated `tokens_prevented` counterfactual number (§3).
 
-### Success criterion — baseline reproduction (concrete, pass/fail)
+### Success criterion — reproduction against a pinned corpus (concrete, pass/fail)
 
 Track A alters no behaviour and claims no savings of its own (I7), so its success is
 **not** a savings number and **not** the un-testable "a report a reader can trust."
-The criterion is that **the new view reproduces the baseline of record**. Run
-`ccgate audit --report` over the same local corpus as `docs/baseline-2026-09-27-fixed.md`
-and it must return:
+The criterion is that **the new view reproduces known counts over a pinned corpus.**
+This has two layers, because the real baseline corpus cannot be committed (1,104
+transcripts, too large, full of local paths).
+
+**Layer 1 — the committed gate: a reduced fixture corpus with known-by-construction
+counts (this is the repeatable, CI-runnable, machine-independent gate).**
+The plan builds a small set of **synthetic, PII-free JSONL transcripts** under
+`tests/fixtures/` — engineered by construction to produce exact, known figures, and
+**including both main-thread and subagent (`.../subagents/agent-*.jsonl`) transcripts**
+so `by_origin` bucketing is exercised. The test asserts the exact counts the fixture is
+built to yield (total misses, main misses, subagent misses, cache-read rate, hit ratio).
+This is the only option that runs in CI and survives a machine change (the reason a file
+list, path list, or hash manifest of the real corpus is rejected — all three break on a
+new machine and none run in CI). Exact match, not "small drift"; the counts are known by
+construction, so any deviation is a bug.
+
+**Layer 2 — the one-time cross-check against the baseline of record (user terminal,
+documented, not a committed test).**
+Once, on the reference machine, run `ccgate audit --report` over the real local corpus
+and confirm it reproduces `docs/baseline-2026-09-27-fixed.md`:
 
 | Figure | Expected (baseline-2026-09-27-fixed) |
 |---|---|
@@ -42,10 +61,10 @@ and it must return:
 | Cache-read rate (token-weighted) | 96.4% |
 | Hit ratio (request-level) | 89.7% |
 
-If the numbers drift, the new summation/plumbing is wrong — regardless of how honest
-the ledger block reads. This is the gate. (The corpus grows over time, so the check is
-run against a **pinned snapshot** of the baseline corpus, not "whatever is on disk
-today"; the plan pins the snapshot. Small drift from corpus growth is not a pass.)
+This confirms the fixture is representative of the real summation path. It is a
+user-terminal step recorded in the plan's evidence, **not** an ongoing CI gate (the
+corpus grows, and it cannot be committed). Layer 1 is the gate that guards regressions;
+Layer 2 is the one-time proof the gate reflects reality.
 
 The honest-ledger properties in §3 and the bound-guard in §6 are **guards**, not the
 criterion — they keep a wrong number from being printed; the criterion above is what
@@ -92,13 +111,14 @@ obscures the one part of the prevention model that still has headroom. Report it
 
 For **D4**, the report surfaces `shape`'s current findings (reusing the existing
 `shape` check functions — `_check_claudemd_excludes`, `_check_deny_reads`,
-`_check_skill_listing`, `bashOutputMaxChars`, etc.) as an **actionable, unapplied**
-list. It does **not** fabricate a single prevented-token number; it reports the
-findings and marks the headroom as available-but-uncaptured. (If a defensible
-per-finding estimate is cheap — e.g. projected startup-char delta for
-`claudeMdExcludes` — it is `~`-prefixed with its assumption per I4; otherwise the
-finding is listed without a number. The plan decides per finding; no fabricated
-aggregate.)
+`_check_skill_listing`, `bashOutputMaxChars`, etc.) as an **actionable, unapplied
+list — with no token estimates in Track A.** This is settled, not left to the plan:
+Track A lists the findings and marks the headroom as available-but-uncaptured, and
+**attaches no number to any of them.** A `claudeMdExcludes` projection (token count for
+files that would stop loading) is measurable in principle, but it is a **counterfactual**,
+and this project has already been burned once by a counterfactual nobody could check
+(the −114,073 dollar figure, §9 of the parent). The real before/after is produced later
+by `shape --fix` measuring an actual applied change — not estimated here. Ship the list.
 
 ### `tokens_avoided`, `tokens_measured`, `tokens_injected`, `net`
 
@@ -150,6 +170,11 @@ from an existing one. This is the reason it is task 1, not merely "folded in."
 and unreliable). The full-suite confirmation is a **user-terminal step**, stated here
 at the plan level, not per-task (parent §12 execution constraint).
 
+**Capture the evidence.** "27 → 0" is the claim; the terminal output is the evidence.
+Paste the actual `pytest -q` summary line into the plan's evidence log. It is the exit
+gate for everything downstream — no Track A test is added, and no later task starts,
+until that green-suite output is recorded.
+
 ### Independent — `ci-probe.yml` removal
 
 Delete the throwaway `ci-probe.yml` from `main` via PR → `verify` → merge (branch
@@ -165,13 +190,23 @@ Track A view; can land any time.
 
 ### Bound assertions (§12.9 applied to Track A output)
 Every figure with a by-construction bound is asserted before printing, and the
-assertion must be **seen to fire** in a test: each ledger category `≥ 0`; net sign
-consistent with I3; cache-read rate ∈ [0,1]; misses ≤ requests; main + subagent misses
-= total misses. This is the same discipline `miss_audit` got in Plan 1 (`total_usd ≥ 0`).
+assertion must be **seen to fire** in a test:
+
+- each ledger category `≥ 0`; net sign consistent with I3;
+- cache-read rate ∈ [0,1]; misses ≤ requests; main + subagent misses = total misses;
+- **every token quantity `≥ 0`** (`grand_total_input`, `cache_read`, `cache_creation`,
+  `input`, `output`);
+- **`cache_read + cache_creation ≤ grand_total_input`.**
+
+The last two are the ones that would have caught the original defect: the 2026-09-26
+failure was a **negative total** that no bound was watching (parent §9). The guard must
+cover the shape of the defect that actually occurred, not only the new figures. This is
+the same discipline `miss_audit` got in Plan 1 (`total_usd ≥ 0`).
 
 ### Tests the agent CAN run (in-process)
-- **Baseline reproduction** (the §1 gate) over the pinned corpus snapshot: asserts the
-  five figures in §1.
+- **Reproduction over the committed fixture corpus** (the §1 Layer-1 gate): asserts the
+  exact known-by-construction counts (total/main/subagent misses, cache-read rate, hit
+  ratio). The §1 Layer-2 full-corpus cross-check is a user-terminal step, not this test.
 - Ledger category values: `avoided == 0`, `measured == 0`, `injected == 0`; per-cause
   `tokens_prevented` shape (A1 unmeasurable, A3 zero, D4 findings present).
 - `--json` shape: `ledger` key present with the category structure.
@@ -197,12 +232,18 @@ agent.
 | `ledger.py` | untouched | Track B concern (Approach A) |
 | `scripts/shape.py` check fns | reuse for D4 findings | `_check_claudemd_excludes`, `_check_deny_reads`, `_check_skill_listing`, … |
 | 5 test files | add `stdin=subprocess.DEVNULL` | Task 1, terminal exit gate |
+| `tests/fixtures/` (new) | synthetic main + subagent JSONL, known counts | §1 Layer-1 gate; PII-free, CI-runnable |
 | `ci-probe.yml` | delete from `main` | independent, PR→verify→merge |
 
 ## 8. Sequence
 
-1. **Subprocess-test fix** → verify 27→0 green **in user's terminal** (exit gate).
+1. **Subprocess-test fix** → verify 27→0 green **in user's terminal**; record the
+   `pytest -q` summary line as evidence (exit gate for everything below).
 2. **`ci-probe.yml` removal** (independent; any time after or in parallel via PR).
-3. **`audit --report` view**: ledger (§3) + framing (§4), TDD, with the §1 baseline
-   reproduction test and the §6 bound-guard test.
-4. Confirm the §1 five figures reproduce against the pinned baseline snapshot.
+3. **Build the committed fixture corpus** (§1 Layer 1): synthetic PII-free JSONL,
+   main + subagent, with known-by-construction counts.
+4. **`audit --report` view**: ledger (§3) + framing (§4), TDD, with the Layer-1
+   fixture-reproduction test and the §6 bound-guard test.
+5. **One-time Layer-2 cross-check** (user terminal): confirm the five
+   `baseline-2026-09-27-fixed` figures reproduce over the real corpus; record in the
+   plan's evidence log.
