@@ -71,14 +71,6 @@ def evaluate(baseline_rc: int, baseline_out: str, treatment_rc: int, treatment_o
 def main() -> int:
     b_rc, b_out = _run(no_enforce=True)
     t_rc, t_out = _run(no_enforce=False)
-    # DIAGNOSTIC: dump raw run output to distinguish a detection miss (read happened,
-    # sentinel not echoed) from a real miss (model never read the file).
-    print(f"---DIAG baseline_rc={b_rc}---")
-    print(b_out)
-    print("---DIAG baseline end---")
-    print(f"---DIAG treatment_rc={t_rc}---")
-    print(t_out)
-    print("---DIAG treatment end---")
     return evaluate(b_rc, b_out, t_rc, t_out, _tokens_ok(b_out))
 
 
