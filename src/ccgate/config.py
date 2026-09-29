@@ -31,6 +31,11 @@ DEFAULTS: dict = {
     "pinnedEffort": None,
     "skillListingBudgetFraction": 0.01,
     "bashRewriteRules": [],
+    "bashCapEnabled": False,
+    "bashCapHeadChars": 4000,
+    "bashCapTailChars": 12000,
+    "bashCapDebugLoopCalls": 3,
+    "bashCapPrefixes": ["pytest", "cargo test", "jest", "go test", "npm test", "mvn test"],
     "startupTokenCap": 12000,
     "otelPort": 4318,
     "digestMaxPaths": 500,
@@ -53,7 +58,13 @@ _RANGE: dict[str, tuple] = {
     "digestMaxPaths":  (1, 10_000),
     "toolCountJumpThreshold": (0, 10_000),
     "taskStateMaxTokens": (100, 2500),
+    "bashCapHeadChars":       (200, 200_000),
+    "bashCapTailChars":       (200, 200_000),
+    "bashCapDebugLoopCalls":  (0, 10_000),
 }
+
+# Config keys whose value is a list merged (project appends to global), not replaced.
+_LIST_KEYS = ("bashRewriteRules", "bashCapPrefixes")
 
 def load_config(cwd: str | None = None) -> dict:
     """Load merged config: global ~/.ccgate/config.json + optional project .ccgate/config.json.
@@ -68,7 +79,7 @@ def load_config(cwd: str | None = None) -> dict:
         _merge_file(cfg, Path(cwd) / ".ccgate" / "config.json")
     # Environment overrides: CCGATE_HIT_RATIO_FLOOR → hitRatioFloor
     for key in list(DEFAULTS.keys()):
-        if key == "bashRewriteRules":
+        if key in _LIST_KEYS:
             continue  # list type not parseable from a single env var
         env_key = "CCGATE_" + _to_upper_snake(key)
         raw = os.environ.get(env_key)
@@ -99,7 +110,7 @@ def _merge_file(cfg: dict, path: Path) -> None:
         if key not in DEFAULTS:
             print(f"ccgate: unknown config key '{key}' in {path} — ignored", file=sys.stderr)
             continue
-        if key == "bashRewriteRules" and isinstance(val, list):
+        if key in _LIST_KEYS and isinstance(val, list):
             cfg[key] = cfg[key] + val
             continue
         lo, hi = _RANGE.get(key, (None, None))
