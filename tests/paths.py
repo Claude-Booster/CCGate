@@ -8,8 +8,8 @@ from ccgate.transcript import encode_cwd
 
 FIXTURES: list[tuple[str, str]] = [
     ("C:\\Users\\fred\\project",                       "c--Users-fred-project"),
-    ("C:\\Users\\frederick.mandap\\CCGate",            "c--Users-frederick-mandap-CCGate"),
-    ("C:\\Users\\fred\\OneDrive - Accenture\\Docs",    "c--Users-fred-OneDrive---Accenture-Docs"),
+    ("C:\\Users\\j.doe\\CCGate",                        "c--Users-j-doe-CCGate"),
+    ("C:\\Users\\fred\\OneDrive - Corp\\Docs",         "c--Users-fred-OneDrive---Corp-Docs"),
     ("/home/user/projects/ccgate",                     "-home-user-projects-ccgate"),
     ("/Users/alice/work/my.project",                   "-Users-alice-work-my-project"),
 ]

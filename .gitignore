@@ -3,3 +3,6 @@ __pycache__/
 
 # Restricted-identifier patterns (local only — never commit)
 .githooks/.blocked
+
+# Internal planning artifacts (may contain machine-specific paths)
+docs/superpowers/plans/
