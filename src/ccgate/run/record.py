@@ -42,6 +42,11 @@ class RunRecorder:
     def append_assistant(self, model: str, usage: dict) -> None:
         self._append(assistant_entry(model, usage))
 
+    def append_event(self, event: dict) -> None:
+        """Append a ccgate_event line (F3 truncation / summary). read_transcript ignores
+        non-'assistant' lines, so this never perturbs token counts (spec §6)."""
+        self._append(event)
+
     def finish(self) -> None:
         self._append({"type": "ccgate_run_end", "status": "complete", "run_id": self.run_id})
 
