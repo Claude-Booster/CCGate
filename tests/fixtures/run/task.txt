@@ -1,1 +1,1 @@
-Read the file target_secret.txt and print its exact contents, then stop.
+Read the file target_marker.txt and print its exact contents, then stop.
