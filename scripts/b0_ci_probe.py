@@ -74,11 +74,6 @@ def evaluate(baseline_rc: int, baseline_out: str, treatment_rc: int, treatment_o
 def main() -> int:
     b_rc, b_out = _run(no_enforce=True)
     t_rc, t_out = _run(no_enforce=False)
-    # DIAGNOSTIC (temporary): dump raw baseline output to see why the read is refused
-    # under bypassPermissions.
-    print(f"---DIAG baseline_rc={b_rc}---")
-    print(b_out)
-    print("---DIAG baseline end---")
     return evaluate(b_rc, b_out, t_rc, t_out, _tokens_ok(b_out))
 
 

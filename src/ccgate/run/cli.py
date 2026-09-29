@@ -29,13 +29,6 @@ def _build_options(patterns, enforce: bool):
         # B1 broadens tools and extends enforcement (Bash rewrite) to match.
         "tools": ["Read"],
         "allowed_tools": ["Read"],
-        # ccgate owns the boundary via its PreToolUse hook, so it must not defer to the SDK's
-        # interactive permission gate: in a non-interactive loop that gate refuses every tool
-        # use (no one to approve), so even an allowed_tools Read fails. bypassPermissions makes
-        # the hook the sole gate — the PreToolUse deny still fires under bypass (only
-        # can_use_tool is shadowed). `tools` MUST stay minimal: bypass means no SDK gate sits
-        # behind the hook, so anything in `tools` runs unless a hook stops it.
-        "permission_mode": "bypassPermissions",
     }
 
 
@@ -50,7 +43,6 @@ def _factory(options):
         setting_sources=options["setting_sources"],
         tools=options["tools"],
         allowed_tools=options["allowed_tools"],
-        permission_mode=options["permission_mode"],
     ))
 
 

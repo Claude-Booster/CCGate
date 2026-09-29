@@ -40,11 +40,8 @@ plugs into. Later sub-projects each get their own spec → plan:
 ### Success criterion — mechanism + substrate (what "B0 works" means)
 1. **The deny is witnessed failing-then-holding (§12.9)** in a real `ccgate run` — **in CI
    as the required proof**, optionally reproduced on-desk (§7) — including the *shadowing*
-   red state: the hook must be shown to fire **under `permission_mode="bypassPermissions"`**
-   (the mode ccgate ships), where the SDK auto-approves every tool — since that is the whole
-   reason hooks were chosen over `can_use_tool`. (Originally stated as "even when `Read` is in
-   `allowed_tools`"; revised per the CI finding in §7 that a non-interactive loop needs bypass
-   to use any tool at all.)
+   red state: the hook must be shown to fire **even when `Read` is in `allowed_tools`**,
+   since that is the whole reason hooks were chosen over `can_use_tool`.
 2. **The run writes `~/.ccgate/runs/<run-id>.jsonl`** that `ccgate audit` parses with **zero
    new reader code** (reuses Track A's `run_audit`).
 3. **The spec states the Track-B measurement criterion**, to be measured once real
@@ -176,23 +173,23 @@ Uses `CLAUDE_CODE_OAUTH_TOKEN` (proven pattern from the ci-probe spike). Two red
 observations, both §12.9:
 1. **The deny** — a real `ccgate run` over the pinned task tries to `Read` the pinned
    target; assert denied and the reason recorded.
-2. **The shadowing** (load-bearing, its own red state) — **same config, `permission_mode=
-   "bypassPermissions"`** (the mode ccgate actually ships — see below): with the hook
-   **absent**, the read **succeeds**; with the hook **present**, it is **denied**. This proves
-   the deny hook fires **under `bypassPermissions`**, where the SDK auto-approves every tool
-   before `can_use_tool` — so the hook, not the SDK gate, is the boundary. (Revised from the
-   original "hook fires despite `allowed_tools`" claim: CI showed that in a non-interactive
-   loop the SDK's default permission gate refuses even an `allowed_tools` Read — no one is
-   present to approve — so ccgate must run under `bypassPermissions` and rely on the hook as
-   the sole gate. The claim we can prove, and the one that matches what ships, is therefore
-   "hook fires under bypass," not "hook fires despite `allowed_tools`.")
+2. **The shadowing** (load-bearing, its own red state) — **same config, `Read` in
+   `allowed_tools`**: with the hook **absent**, the read **succeeds**; with the hook
+   **present**, it is **denied**. This proves the hook fires for a pre-approved tool — the
+   reason hooks were chosen over `can_use_tool` — rather than trusting the README. ccgate does
+   **not** set `permission_mode="bypassPermissions"`: `allowed_tools` already auto-approves the
+   listed tools non-interactively (verified in CI — the baseline read succeeds without bypass),
+   and leaving the SDK's default permission gate in place keeps it as a backstop behind the
+   deny hook (defense in depth). Bypass was investigated and rejected: it removes that backstop
+   and makes hook correctness the *only* boundary once `Bash` is in play, so `tools` is kept
+   explicitly minimal instead.
 
-   **Consequence — hook correctness is load-bearing:** under `bypassPermissions` no SDK
-   permission gate sits behind the hook, so anything in `tools` runs unless a hook stops it.
-   B0 is safe because `tools=["Read"]` and the deny hook covers the only tool. B1b adds
-   `Bash`: with bypass, ccgate's hooks are the *only* thing between the model and arbitrary
-   shell execution. Keep `tools` explicitly minimal and treat hook correctness as a security
-   property, not just an efficiency one.
+   **CI finding — sensitive-filename guard (fixture design):** Claude Code hard-denies reading
+   files whose names look like secrets (`*secret*`, `*credential*`, `.env`, keys), independent
+   of `permission_mode` — a safety guard, not a promptable permission. An early fixture named
+   `target_secret.txt` was therefore denied in the *baseline* too, masking the shadowing proof
+   (the read looked denied with no hook). The fixture uses a neutral name (`target_marker.txt`)
+   so the **only** deny in the treatment is ccgate's own hook.
 
 **Public-repo safety (explicit):** the hook-absent red-state run *actually performs the
 Read*. The task prompt and target path are **pinned to a committed fixture file** under the

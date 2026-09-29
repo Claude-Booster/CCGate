@@ -70,16 +70,6 @@ def test_b0_restricts_tools_to_read():
     assert opts["allowed_tools"] == ["Read"]
 
 
-def test_permission_mode_is_bypass():
-    """ccgate run owns the boundary via its PreToolUse hook, so it must not defer to the SDK's
-    interactive permission gate — in a non-interactive loop that gate refuses every tool use
-    (no one to approve), so even allowed_tools reads fail. bypassPermissions makes the hook the
-    sole gate; the PreToolUse deny still fires under bypass (only can_use_tool is shadowed)."""
-    from ccgate.run.cli import _build_options
-    assert _build_options([], enforce=True)["permission_mode"] == "bypassPermissions"
-    assert _build_options([], enforce=False)["permission_mode"] == "bypassPermissions"
-
-
 def test_missing_sdk_gives_clean_error(tmp_path, monkeypatch, capsys):
     """Without the 'run' extra, `ccgate run` exits cleanly, not with a traceback (review #2)."""
     import importlib.util as iu
