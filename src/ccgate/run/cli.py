@@ -7,28 +7,27 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from ccgate.config import load_config
+from ccgate.run.bashcap import BashCapHook, compile_prefixes
 from ccgate.run.policy import load_contextignore, make_read_deny_hook
 from ccgate.run.record import RunRecorder, make_run_id
 
 
-def _build_options(patterns, enforce: bool):
+def _build_options(patterns, enforce: bool, config: dict, bashcap_hook):
     """Dict-like config the client_factory consumes. NO SDK import here — keeps run_task
-    and the in-process fake-client tests SDK-free. PreToolUse holds the RAW async callback;
-    the real _factory wraps it in a HookMatcher (spec §7)."""
-    hooks_list = []
-    if enforce:
-        hooks_list = [make_read_deny_hook(patterns)]   # raw callback; wrapped for the real SDK in _factory
+    and the in-process fake-client tests SDK-free. PreToolUse holds the RAW F1 callback and
+    PostToolUse the RAW F3 callback; the real _factory wraps each in a HookMatcher (spec §7).
+
+    B0 grants only Read (availability + auto-approve). B1b adds Bash — availability AND
+    auto-approve — only when F3 is active, so F3 can see Bash output to truncate it."""
+    pre = [make_read_deny_hook(patterns)] if enforce else []
+    post = [bashcap_hook] if (enforce and bashcap_hook is not None) else []
+    tools = ["Read"] + (["Bash"] if post else [])
     return {
-        "hooks": {"PreToolUse": hooks_list},
+        "hooks": {"PreToolUse": pre, "PostToolUse": post},
         "setting_sources": [],
-        # B0 grants only Read. `tools` controls AVAILABILITY (the model can call nothing else),
-        # `allowed_tools` auto-APPROVES it (executes without a permission prompt — required in
-        # non-interactive mode). Both are needed: allowed_tools alone leaves Bash/Grep available
-        # but unapproved, so the model reaches for them and is blocked before ever using Read.
-        # Withholding non-Read tools also removes the bypass around the .contextignore deny.
-        # B1 broadens tools and extends enforcement (Bash rewrite) to match.
-        "tools": ["Read"],
-        "allowed_tools": ["Read"],
+        "tools": tools,
+        "allowed_tools": list(tools),
     }
 
 
@@ -36,8 +35,13 @@ def _factory(options):
     """Real-SDK client factory: translate the raw-callback dict → ClaudeAgentOptions/HookMatcher.
     All SDK imports are confined here so run_task/_build_options stay SDK-free and testable."""
     from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
-    raw = options["hooks"]["PreToolUse"]
-    hooks = {"PreToolUse": [HookMatcher(matcher="Read", hooks=raw)]} if raw else {}
+    pre = options["hooks"]["PreToolUse"]
+    post = options["hooks"]["PostToolUse"]
+    hooks = {}
+    if pre:
+        hooks["PreToolUse"] = [HookMatcher(matcher="Read", hooks=pre)]
+    if post:
+        hooks["PostToolUse"] = [HookMatcher(matcher="Bash", hooks=post)]
     return ClaudeSDKClient(options=ClaudeAgentOptions(
         hooks=hooks,
         setting_sources=options["setting_sources"],
@@ -47,10 +51,18 @@ def _factory(options):
 
 
 async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory,
-                   options_builder=_build_options) -> Path:
+                   config: dict | None = None) -> Path:
+    if config is None:
+        config = load_config(str(cwd))
     patterns = load_contextignore(cwd)
-    options = options_builder(patterns, enforce)
     recorder = RunRecorder(make_run_id(str(cwd)))
+    bashcap_hook = None
+    if enforce and config.get("bashCapEnabled"):
+        bashcap_hook = BashCapHook(
+            compile_prefixes(config["bashCapPrefixes"]),
+            config["bashCapHeadChars"], config["bashCapTailChars"],
+            config["bashCapDebugLoopCalls"], recorder)
+    options = _build_options(patterns, enforce, config, bashcap_hook)
     async with client_factory(options=options) as client:
         await client.query(task_prompt)
         async for msg in client.receive_response():
@@ -64,6 +76,8 @@ async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory
             usage = getattr(msg, "usage", None)
             if model is not None and usage is not None:
                 recorder.append_assistant(model, usage)
+    if bashcap_hook is not None:
+        recorder.append_event(bashcap_hook.summary())   # F3 run summary (spec §6)
     recorder.finish()
     return recorder.path
 

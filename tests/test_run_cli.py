@@ -65,9 +65,27 @@ def test_b0_restricts_tools_to_read():
     allowed_tools alone leaves Bash/Grep available-but-unapproved, so the model reaches for them
     and is blocked before using Read; and it would leave a non-Read bypass of the deny (review #3)."""
     from ccgate.run.cli import _build_options
-    opts = _build_options([], enforce=True)
+    from ccgate.config import load_config
+    opts = _build_options([], enforce=True, config=load_config(), bashcap_hook=None)
     assert opts["tools"] == ["Read"]
     assert opts["allowed_tools"] == ["Read"]
+
+
+def test_bashcap_disabled_by_default_no_bash_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))       # no config → bashCapEnabled False
+    asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
+    opts = _FakeClient.last_options
+    assert "Bash" not in opts["allowed_tools"]
+    assert opts["hooks"].get("PostToolUse", []) == []
+
+
+def test_bashcap_enabled_adds_bash_and_posttool_hook(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    (tmp_path / "config.json").write_text('{"bashCapEnabled": true}', encoding="utf-8")
+    asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
+    opts = _FakeClient.last_options
+    assert "Bash" in opts["allowed_tools"] and "Bash" in opts["tools"]
+    assert opts["hooks"]["PostToolUse"]       # hook present
 
 
 def test_missing_sdk_gives_clean_error(tmp_path, monkeypatch, capsys):
@@ -107,6 +125,8 @@ def test_factory_builds_real_sdk_options():
     """The translation seam (raw dict -> ClaudeAgentOptions/HookMatcher) must not drift from the
     SDK signatures. Constructing options needs no auth/network — catch drift here, not in CI."""
     from ccgate.run.cli import _build_options, _factory
+    from ccgate.config import load_config
+    cfg = load_config()
     # Both enforce states must build a real client without raising:
-    assert _factory(_build_options(["secrets/*.txt"], enforce=True)) is not None
-    assert _factory(_build_options([], enforce=False)) is not None
+    assert _factory(_build_options(["secrets/*.txt"], enforce=True, config=cfg, bashcap_hook=None)) is not None
+    assert _factory(_build_options([], enforce=False, config=cfg, bashcap_hook=None)) is not None
