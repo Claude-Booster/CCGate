@@ -69,11 +69,14 @@ made **insensitive** to the unknown rather than guessing:
 
 ## 5. Debug-loop escape (per BUILD-SPEC-phase2 §F2.5)
 
-If the **identical** command (compared by hash) ran within the last `bashCapDebugLoopTurns`
-(default 3) Bash tool-calls, **do not truncate** — a repeat means active debugging and the
+If the **identical** command (compared by hash) ran within the last `bashCapDebugLoopCalls`
+(default 3) **Bash tool-calls**, **do not truncate** — a repeat means active debugging and the
 model needs full output; truncating a debug loop turns a 2-turn fix into 6 and costs more
-than it saves. State is per-run: `{command_hash: last_bash_call_index}`, held by the hook
-wrapper (not the pure module). Each Bash call increments the index. **Count the skips:** a
+than it saves. The window is counted in **Bash calls, not conversational turns** — a
+test-fix loop can fire several Bash calls inside one turn, and call-indexing is both simpler
+and the better fit (the config key is named `…Calls` so it does not claim otherwise). State
+is per-run: `{command_hash: last_bash_call_index}`, held by the hook wrapper (not the pure
+module). Each Bash call increments the index. **Count the skips:** a
 per-run counter `debug_loop_skips`, reported alongside `chars_elided` (§6) — if the escape
 fires often it is eating F3's value and the operator needs to see that.
 
@@ -102,6 +105,9 @@ register the PostToolUse cap hook; B0's F1 Read-deny is unchanged. `--no-enforce
 **In-process (agent-runnable, no SDK):**
 - `bashcap` pure logic: prefix match; load-time regex-metachar rejection; `truncate`
   head/tail/marker with **exact `chars_elided`**; under-budget and non-matching passthrough.
+- **`truncate` boundary cases** (cheap, and it has arithmetic): `head + tail >= len(stdout)`
+  is the no-change path (`chars_elided == 0`, output identical); `head == 0` still produces
+  valid output (tail + marker only, no negative slice); `tail == 0` symmetric.
 - debug-loop escape: repeat within N calls → no truncation; skip counter increments.
 - adapter unit tests over synthetic `input_data` dicts (dict-with-stdout → truncated;
   str `tool_response` → truncated; **dict-without-stdout → passthrough, no event**, §8).
@@ -109,6 +115,9 @@ register the PostToolUse cap hook; B0's F1 Read-deny is unchanged. `--no-enforce
   truncation event is recorded.
 
 **Real (CI `workflow_dispatch` / user terminal — the required proof, §12.9 red→green):**
+A **separate** `scripts/b1b_ci_probe.py` + its own `workflow_dispatch` workflow — **not** an
+extension of B0's `b0_ci_probe.py`. B0's CI run is now the reference proof for the whole
+harness; keeping F3's probe separate means B1b churn can't break B0's green.
 - **First step prints the raw `input_data`** of one Bash call (shape confirmation — print,
   don't assert), then the adapter is confirmed/adjusted against it.
 - A prefixed command emitting >budget stdout, run **without** the hook (record/model sees
@@ -144,10 +153,16 @@ Add to `config.DEFAULTS` / `_RANGE`:
 | Key | Default | Range | Meaning |
 |---|---|---|---|
 | `bashCapEnabled` | `False` | — | master toggle for F3 |
-| `bashCapHeadChars` | `4000` | 0–10,000,000 | chars kept from the start |
-| `bashCapTailChars` | `12000` | 0–10,000,000 | chars kept from the end (verdict/summary) |
-| `bashCapDebugLoopTurns` | `3` | 0–10,000 | repeat-within-N-Bash-calls → skip truncation |
+| `bashCapHeadChars` | `4000` | 200–200,000 | chars kept from the start |
+| `bashCapTailChars` | `12000` | 200–200,000 | chars kept from the end (verdict/summary) |
+| `bashCapDebugLoopCalls` | `3` | 0–10,000 | repeat-within-N-**Bash-calls** → skip truncation (0 disables the escape) |
 | `bashCapPrefixes` | `[pytest, cargo test, jest, go test, npm test, mvn test]` | list (merged like `bashRewriteRules`) | commands to cap; **grep/find dropped** (uniform, head-useful output — see review) |
+
+**Range floors/ceilings are load-bearing, not cosmetic** (same reasoning as `taskStateMaxTokens`'s
+non-zero floor): a `0` head+tail truncates everything to just the marker, and a 10M head+tail
+means the threshold (`head+tail`) never trips and F3 silently never fires — two ways a config
+typo makes the feature useless in opposite directions. The `200–200,000` bounds keep the knob
+in the range where it means something.
 
 Truncation triggers when a matched command's stdout exceeds `head + tail` (16,000 default).
 The 25/75 head:tail split favours the tail because every shipped prefix is a test runner
@@ -160,7 +175,7 @@ whose verdict is at the end; per-prefix splits are deferred (YAGNI).
 | `src/ccgate/run/bashcap.py` (new) | pure: `compile_prefixes`, `command_matches`, `truncate`, `MARKER` | yes |
 | `src/ccgate/run/cli.py` (modify) | build the PostToolUse hook (adapter + debug-loop state + recording); add Bash to tools when enabled | adapter is SDK-shape-facing but unit-tested over synthetic dicts |
 | `src/ccgate/config.py` (modify) | add the `bashCap*` defaults + ranges + prefix list-merge | yes |
-| `scripts/b0_ci_probe.py` or a new `b1b` probe | CI: print raw `input_data`, then red→green truncation check | n/a (CI) |
+| `scripts/b1b_ci_probe.py` (new) + `.github/workflows/b1b-*.yml` | CI: print raw `input_data`, then red→green truncation check. Separate from B0's probe (keeps B0's reference proof stable) | n/a (CI) |
 | `src/ccgate/run/record.py` (reuse) | `RunRecorder` gains an `append_event(dict)` for `ccgate_event` lines | yes |
 
 ## 11. Deferred
