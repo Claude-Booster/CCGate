@@ -77,13 +77,27 @@ def _one_run(enforce: bool, base_sha: str) -> dict:
 
 
 def main() -> int:
+    # Variance-only is the DEFAULT (2 runs); --full opts into the A/B (2N runs). The cheap first
+    # step can return derive_n=None (unmeasurable) or f1_fires=0 (F1 never fired) — either is a
+    # terminal answer that saves the full A/B (spec §3/§5).
+    full = "--full" in sys.argv
     base_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO),
                               capture_output=True, text=True).stdout.strip()
     v1, v2 = _one_run(True, base_sha), _one_run(True, base_sha)   # variance check: 2 enforced runs
     n = derive_n(v1["tokens_total"], v2["tokens_total"])
+    vf1 = v1["f1_fires"] + v2["f1_fires"]
+    vf3 = v1["f3_truncations"] + v2["f3_truncations"]
     print(f"VARIANCE enforced tokens: {v1['tokens_total']} vs {v2['tokens_total']} -> N={n}")
+    print(f"VARIANCE_DIAG f1_fires={vf1} f3_truncations={vf3} "
+          f"complete={v1['complete']},{v2['complete']} reasons={v1['reason']},{v2['reason']}")
+    if vf1 == 0:
+        print("FINDING: F1 did not fire on real work in this repo (spec §5) — any A/B measures F3 alone.")
     if n is None:
         print("VERDICT: UNMEASURABLE (variance > 25% — effect not detectable at feasible cost)")
+        _reset_tree(base_sha)
+        return 0
+    if not full:
+        print(f"VARIANCE-ONLY: N={n}. Re-dispatch with --full to run the A/B (2N runs).")
         _reset_tree(base_sha)
         return 0
     enforced = [v1, v2] + [_one_run(True, base_sha) for _ in range(max(0, n - 2))]
