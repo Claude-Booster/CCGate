@@ -6,28 +6,15 @@ from __future__ import annotations
 
 import hashlib
 
-_METACHARS = set(".*+?[(")
+# Prefix helpers relocated to run/shellcmd.py (shared, so it cannot depend on this feature
+# module). Re-imported here so existing callers/tests keep working unchanged.
+from ccgate.run.shellcmd import compile_prefixes, command_matches  # noqa: F401
 
 
 def build_marker(elided: int, head: int, tail: int) -> str:
     return (f"\n[ccgate F3: kept {head} head + {tail} tail; "
             f"elided {elided} chars (~{elided // 4} tokens) from the middle. "
             f"Narrow the command or raise bashCapTailChars to see more.]\n")
-
-
-def compile_prefixes(prefixes: list[str]) -> list[str]:
-    """Return the prefixes unchanged, or raise ValueError if any contains a regex metachar
-    (literal-prefix matching only — BUILD-SPEC §433 safety)."""
-    for p in prefixes:
-        bad = _METACHARS & set(p)
-        if bad:
-            raise ValueError(f"bashCapPrefixes entry {p!r} contains regex metachar(s) {sorted(bad)}; "
-                             "literal prefixes only")
-    return list(prefixes)
-
-
-def command_matches(command: str, prefixes: list[str]) -> bool:
-    return any(command.startswith(p) for p in prefixes)
 
 
 def truncate(stdout: str, head: int, tail: int) -> tuple[str, int]:
@@ -86,6 +73,11 @@ class BashCapHook:
             if input_data.get("tool_name") != "Bash":
                 return {}
             command = (input_data.get("tool_input") or {}).get("command", "")
+            # NOTE: startswith is correct HERE — B1b prefixes like "cargo test" must match
+            # "cargo test --all"; do NOT switch this to first-token equality (that is B1a's
+            # reader gate, a different problem). The only gap is that runner prefixes
+            # (sudo/time/env) defeat it, so `sudo pytest` is not truncated. Fix when B1b is
+            # next touched: command = shellcmd.strip_runner_prefixes(command) before matching.
             if not command_matches(command, self.prefixes):
                 return {}
             self._call_index += 1
