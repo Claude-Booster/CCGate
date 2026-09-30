@@ -179,3 +179,23 @@ def test_bash_deny_records_matched_pattern(tmp_path, monkeypatch):
     _bash_call(hook, "cat foo.lock")
     ev = [e for e in _events(rec) if e.get("rule") == "F1" and e.get("surface") == "bash"]
     assert ev[-1]["matched_pattern"] == "*.lock"
+
+
+def test_baseline_empty_patterns_allow_default_reader(tmp_path, monkeypatch):
+    # Pins the b1a probe's baseline mechanism: default bashReadPrefixes DOES include 'cat'
+    # (list-merged, non-emptyable), so the deny must be disabled via EMPTY patterns
+    # (empty .contextignore), not by emptying the prefix list. Empty patterns -> allow.
+    from ccgate.config import load_config
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    cfg = load_config()
+    assert "cat" in cfg["bashReadPrefixes"]                       # default readers include cat
+    hook = make_bash_read_deny_hook([], cfg["bashReadPrefixes"], RunRecorder("r-base"))
+    assert _bash_call(hook, "cat target_marker.txt") == {}        # no patterns -> allow (RED baseline)
+
+
+def test_treatment_real_patterns_deny_default_reader(tmp_path, monkeypatch):
+    from ccgate.config import load_config
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    cfg = load_config()
+    hook = make_bash_read_deny_hook(["target_marker.txt"], cfg["bashReadPrefixes"], RunRecorder("r-treat"))
+    assert _is_deny(_bash_call(hook, "cat target_marker.txt"))    # real pattern -> deny (GREEN treatment)

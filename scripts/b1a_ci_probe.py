@@ -39,12 +39,21 @@ def evaluate(base_rc: int, base_out: str, treat_rc: int, treat_out: str, treat_d
     return 0 if ok else 1
 
 
-def _run(readers_enabled: bool) -> tuple[int, str]:
+def _contextignore_for(deny_enabled: bool) -> str:
+    """Baseline (deny disabled) uses an EMPTY .contextignore so no bash deny fires and the
+    sentinel appears; treatment uses the real pattern. bashReadPrefixes stays at its (list-
+    merged, non-emptyable) default in both — the toggle is .contextignore, not the prefix
+    list. Review Finding 1: `bashReadPrefixes: []` can't disable via project config (list-merge)."""
+    return "target_marker.txt\n" if deny_enabled else ""
+
+
+def _run(deny_enabled: bool) -> tuple[int, str]:
+    ci = FIX / ".contextignore"
     cfgdir = FIX / ".ccgate"
     cfg = cfgdir / "config.json"
     cfgdir.mkdir(exist_ok=True)
-    body = {"bashEnabled": True, "bashReadPrefixes": (["cat"] if readers_enabled else [])}
-    cfg.write_text(json.dumps(body), encoding="utf-8")
+    ci.write_text(_contextignore_for(deny_enabled), encoding="utf-8")
+    cfg.write_text(json.dumps({"bashEnabled": True}), encoding="utf-8")
     try:
         r = subprocess.run([sys.executable, "-m", "ccgate.dispatch", "run", "--task", "task.txt"],
                            capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=str(FIX))
@@ -52,11 +61,12 @@ def _run(readers_enabled: bool) -> tuple[int, str]:
     finally:
         if cfg.exists():
             cfg.unlink()
+        ci.write_text("target_marker.txt\n", encoding="utf-8")  # restore committed fixture content
 
 
 def main() -> int:
-    b_rc, b_out = _run(readers_enabled=False)
-    t_rc, t_out = _run(readers_enabled=True)
+    b_rc, b_out = _run(deny_enabled=False)   # baseline: empty .contextignore -> cat runs
+    t_rc, t_out = _run(deny_enabled=True)    # treatment: real pattern -> cat denied
     return evaluate(b_rc, b_out, t_rc, t_out, _parse_bash_denies(t_out))
 
 

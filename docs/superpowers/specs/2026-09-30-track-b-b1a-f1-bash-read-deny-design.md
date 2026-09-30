@@ -58,7 +58,7 @@ A **PreToolUse hook with `matcher="Bash"`** returning `permissionDecision: "deny
 ### `config.py`
 - **Rename** `bashCapEnabled` → `bashEnabled` (master switch: grants Bash + registers *both* the F1 Bash-read deny and F3 truncation). `bashCap*` (head/tail/debug-loop/prefixes) remain the **truncation knobs beneath it**.
 - Add `bashReadPrefixes` (default `["cat","head","tail","less","more","sed","awk"]`), validated via `compile_prefixes` (metachar rejection at load), list-merge like `bashCapPrefixes`.
-- Each feature **self-gates on its prefix list**: empty `bashCapPrefixes` → no truncation; empty `bashReadPrefixes` (or empty `.contextignore`) → no bash deny.
+- Each feature **self-gates**: empty `bashCapPrefixes` → no truncation; an **empty `.contextignore`** (no patterns) → no bash deny. NOTE: `bashReadPrefixes` and `bashCapPrefixes` are **list-merge keys** (`_LIST_KEYS`), so a project `[]` *appends* onto the defaults rather than clearing them — the prefix lists cannot be emptied via project config. The disable path for the bash deny is therefore an empty `.contextignore` (or default readers matching nothing), never `bashReadPrefixes: []`. (This is the mechanism the B1a CI probe's baseline uses.)
 
 ### `run/cli.py` wiring
 When `enforce` **and `bashEnabled`**: register `PreToolUse = [HookMatcher("Read", [read_deny]), HookMatcher("Bash", [bash_read_deny])]` and `PostToolUse = [HookMatcher("Bash", [bashcap])]`. When not `bashEnabled`: `PreToolUse = [HookMatcher("Read", [read_deny])]` only, no Bash tool. `_factory` translates the raw-callback dict to `ClaudeAgentOptions`; the two-PreToolUse-matcher shape is exercised by the factory-drift test (the seam untested in B0).
