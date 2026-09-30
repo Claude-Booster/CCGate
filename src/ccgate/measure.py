@@ -49,3 +49,44 @@ def extract_run_metrics(record_path) -> dict:
     return {"tokens_total": tokens_total, "turns": turns, "f1_fires": f1_fires,
             "f3_truncations": f3_truncations, "misses_per_1k": misses_per_1k,
             "complete_marker": complete_marker}
+
+
+def derive_n(t1: float, t2: float) -> int | None:
+    """N per arm from the two enforced variance runs. d = |t1-t2| / mean on tokens/task.
+    d<=10% -> 5; 10<d<=25% -> 9; d>25% -> None (unmeasurable at feasible cost) (spec §3)."""
+    mean = (t1 + t2) / 2
+    if mean == 0:
+        return 5
+    d = abs(t1 - t2) / mean
+    if d <= 0.10:
+        return 5
+    if d <= 0.25:
+        return 9
+    return None
+
+
+def _completed(arm: list[dict]) -> list[dict]:
+    return [r for r in arm if r.get("complete")]
+
+
+def decide(baseline: list[dict], enforced: list[dict]) -> dict:
+    """Pre-declared decision rule (spec §6). Computed from data, not adjustable after seeing it."""
+    b_done, e_done = _completed(baseline), _completed(enforced)
+    b_rate = len(b_done) / len(baseline) if baseline else 0.0
+    e_rate = len(e_done) / len(enforced) if enforced else 0.0
+    if b_rate <= 0.5 or e_rate <= 0.5:
+        return {"verdict": "VOID",
+                "reason": f"completion too low (baseline {b_rate:.0%}, enforced {e_rate:.0%})",
+                "baseline_rate": b_rate, "enforced_rate": e_rate}
+    baseline_min = min(r["tokens_total"] for r in b_done)
+    enforced_median = statistics.median(r["tokens_total"] for r in e_done)
+    if enforced_median < baseline_min and e_rate >= b_rate:
+        verdict = "BUILD_B1C"
+        reason = f"enforced median {enforced_median} < baseline min {baseline_min} and completion held"
+    else:
+        verdict = "NO_BUILD"
+        reason = (f"enforced median {enforced_median} not below baseline min {baseline_min}"
+                  if enforced_median >= baseline_min else
+                  f"enforced completion {e_rate:.0%} < baseline {b_rate:.0%}")
+    return {"verdict": verdict, "reason": reason, "baseline_min": baseline_min,
+            "enforced_median": enforced_median, "baseline_rate": b_rate, "enforced_rate": e_rate}
