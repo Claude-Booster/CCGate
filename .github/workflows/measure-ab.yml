@@ -1,5 +1,11 @@
 name: measure-ab
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Run the full A/B (2N runs). Default false = variance check only (2 runs)."
+        type: boolean
+        default: false
 jobs:
   measure:
     runs-on: ubuntu-latest
@@ -13,4 +19,4 @@ jobs:
       - name: Enforcement A/B
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: python scripts/measure_ab.py
+        run: python scripts/measure_ab.py ${{ inputs.full && '--full' || '' }}
