@@ -1,8 +1,13 @@
-"""policy.py — Track B B0 enforcement: .contextignore matching + PreToolUse deny callback."""
+"""policy.py — Track B enforcement: .contextignore matching + PreToolUse deny callbacks."""
 from __future__ import annotations
 
 import fnmatch
 from pathlib import Path
+
+from ccgate.run.shellcmd import first_token, strip_runner_prefixes
+
+_COST_REASON = ("{tok} is listed in .contextignore and is excluded because reading it is "
+                "expensive and rarely useful; skip it and continue.")
 
 
 def load_contextignore(root: Path) -> list[str]:
@@ -58,3 +63,50 @@ def make_read_deny_hook(patterns: list[str]):
             }
         return {}
     return _hook
+
+
+class BashReadDeny:
+    """Stateful PreToolUse Bash callback: deny common readers of a .contextignore'd path.
+    Best-effort efficiency, not a control (spec §1). Owns matcher_errors (spec §7)."""
+
+    def __init__(self, patterns, reader_prefixes, recorder):
+        self.patterns = patterns
+        self.readers = set(reader_prefixes)   # first-token equality, not startswith
+        self.recorder = recorder
+        self.denies = 0
+        self.matcher_errors = 0
+
+    async def __call__(self, input_data, tool_use_id, context) -> dict:
+        try:
+            if input_data.get("tool_name") != "Bash":
+                return {}
+            command = (input_data.get("tool_input") or {}).get("command", "")
+            effective = strip_runner_prefixes(command)
+            if first_token(effective) not in self.readers:
+                return {}
+            for tok in effective.split():
+                tok = tok.strip("'\"")
+                if path_is_ignored(tok, self.patterns):
+                    self.denies += 1
+                    self.recorder.append_event({
+                        "type": "ccgate_event", "rule": "F1", "surface": "bash",
+                        "command_prefix": command[:40],
+                        "matched_token": tok,
+                    })
+                    return {"hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": _COST_REASON.format(tok=tok),
+                    }}
+            return {}
+        except Exception:
+            self.matcher_errors += 1   # increment FIRST, then return (spec §7)
+            return {}
+
+    def summary(self) -> dict:
+        return {"type": "ccgate_event", "rule": "F1", "surface": "bash", "summary": True,
+                "denies": self.denies, "matcher_errors": self.matcher_errors}
+
+
+def make_bash_read_deny_hook(patterns, reader_prefixes, recorder) -> BashReadDeny:
+    return BashReadDeny(patterns, reader_prefixes, recorder)
