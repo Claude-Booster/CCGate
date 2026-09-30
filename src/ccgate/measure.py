@@ -90,3 +90,21 @@ def decide(baseline: list[dict], enforced: list[dict]) -> dict:
                   f"enforced completion {e_rate:.0%} < baseline {b_rate:.0%}")
     return {"verdict": verdict, "reason": reason, "baseline_min": baseline_min,
             "enforced_median": enforced_median, "baseline_rate": b_rate, "enforced_rate": e_rate}
+
+
+def classify_completion(done_ok: bool, returncode: int, max_turns_hit: bool) -> tuple[bool, str]:
+    """Map a run outcome to (complete, reason). A done run is 'ok' regardless; otherwise a
+    turn-cap hit and a crash are distinguished from a plain give-up (spec §2)."""
+    if done_ok:
+        return True, "ok"
+    if max_turns_hit:
+        return False, "turn_cap"
+    if returncode != 0:
+        return False, "error"
+    return False, "gave_up"
+
+
+def tokens_injected_present(bashcap_source: str) -> bool:
+    """True if the F3 event in bashcap source records the tokens_injected field (done-condition
+    part 2). A cheap textual check — the harness's pytest run is the real done gate (spec §4)."""
+    return "tokens_injected" in bashcap_source
