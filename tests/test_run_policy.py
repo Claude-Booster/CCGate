@@ -44,3 +44,22 @@ def test_glob_matches_full_path_and_basename(tmp_path):
 
 def test_empty_patterns_never_match():
     assert path_is_ignored("anything.txt", []) is False
+
+
+def test_backslash_paths_normalized():
+    assert path_is_ignored("C:\\repo\\foo.lock", ["*.lock"]) is True
+    assert path_is_ignored("C:\\repo\\src\\app.py", ["*.lock"]) is False
+
+
+def test_trailing_slash_directory_segment_match():
+    pats = ["node_modules/"]
+    assert path_is_ignored("node_modules/pkg/index.js", pats) is True
+    assert path_is_ignored("src/node_modules/a.js", pats) is True
+    assert path_is_ignored("node_modules", pats) is True
+    assert path_is_ignored("mynode_modules/x.js", pats) is False   # substring, not a segment
+    assert path_is_ignored("src/app.py", pats) is False
+
+
+def test_existing_glob_and_basename_still_work():
+    assert path_is_ignored("a/b/package-lock.json", ["package-lock.json"]) is True
+    assert path_is_ignored("x/y/foo.min.js", ["*.min.js"]) is True

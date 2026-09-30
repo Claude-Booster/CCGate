@@ -19,11 +19,21 @@ def load_contextignore(root: Path) -> list[str]:
 
 
 def path_is_ignored(path: str, patterns: list[str]) -> bool:
-    """True if path matches any pattern (glob on the full path or its basename). B0 semantics;
-    full gitignore semantics are B1."""
-    name = Path(path).name
+    """True if path matches any pattern. Normalizes \\ -> / so Windows paths and forward-
+    slash patterns agree. A trailing-slash pattern 'X/' matches iff X is a complete path
+    segment (the dir itself and everything beneath, at any depth). Otherwise fnmatch on the
+    full path or basename. Pure 'any match -> ignored' -- no negation (spec §3)."""
+    norm = path.replace("\\", "/")
+    name = norm.rsplit("/", 1)[-1]
+    wrapped = "/" + norm + "/"
     for pat in patterns:
-        if fnmatch.fnmatch(path, pat) or fnmatch.fnmatch(name, pat):
+        p = pat.replace("\\", "/")
+        if p.endswith("/"):
+            seg = p[:-1]
+            if seg and ("/" + seg + "/") in wrapped:
+                return True
+            continue
+        if fnmatch.fnmatch(norm, p) or fnmatch.fnmatch(name, p):
             return True
     return False
 
