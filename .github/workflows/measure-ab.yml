@@ -1,0 +1,22 @@
+name: measure-ab
+on:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Run the full A/B (2N runs). Default false = variance check only (2 runs)."
+        type: boolean
+        default: false
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: pip install -e ".[run,dev]"
+      - run: git config user.email "ci@example.com" && git config user.name "ci"
+      - name: Enforcement A/B
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: python scripts/measure_ab.py ${{ inputs.full && '--full' || '' }}
