@@ -12,7 +12,7 @@ from ccgate.run.policy import load_contextignore
 from ccgate.run.record import RunRecorder, make_run_id
 
 
-def _build_options(patterns, enforce: bool, config: dict, recorder):
+def _build_options(patterns, enforce: bool, config: dict, recorder, max_turns=None):
     """Dict-like config the client_factory consumes. NO SDK import here — keeps run_task
     and the in-process fake-client tests SDK-free. PreToolUse/PostToolUse hold (matcher, raw
     callback) tuples; the real _factory wraps each in a HookMatcher (spec §7).
@@ -44,6 +44,7 @@ def _build_options(patterns, enforce: bool, config: dict, recorder):
         "setting_sources": [],
         "tools": tools,
         "allowed_tools": list(tools),
+        "max_turns": max_turns,
     }
 
 
@@ -64,16 +65,17 @@ def _factory(options):
         setting_sources=options["setting_sources"],
         tools=options["tools"],
         allowed_tools=options["allowed_tools"],
+        max_turns=options["max_turns"],
     ))
 
 
 async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory,
-                   config: dict | None = None) -> Path:
+                   config: dict | None = None, max_turns: int | None = None) -> Path:
     if config is None:
         config = load_config(str(cwd))
     patterns = load_contextignore(cwd)
     recorder = RunRecorder(make_run_id(str(cwd)))
-    options = _build_options(patterns, enforce, config, recorder)
+    options = _build_options(patterns, enforce, config, recorder, max_turns)
     # Stateful hooks (bash-read deny, bashcap) expose summary(); the read-deny closure does not.
     summaries = [cb for _, cb in options["hooks"]["PostToolUse"]]
     summaries += [cb for _, cb in options["hooks"]["PreToolUse"] if hasattr(cb, "summary")]
@@ -101,6 +103,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--no-enforce", action="store_true",
                         help="MEASUREMENT BASELINE ONLY: omit enforcement — the agent will "
                              "genuinely perform reads that enforcement would deny. Not a safe default.")
+    parser.add_argument("--max-turns", type=int, default=None,
+                        help="Per-run turn cap (measurement cost control). Omit for no cap.")
     args = parser.parse_args(argv)
     if not args.task.exists():
         print(f"ccgate run: task file not found: {args.task}", file=sys.stderr)
@@ -114,5 +118,5 @@ def main(argv: list[str] | None = None) -> None:
         print("ccgate run requires the 'run' extra: pip install -e '.[run]'", file=sys.stderr)
         sys.exit(1)
     path = asyncio.run(run_task(prompt, enforce=not args.no_enforce, cwd=Path.cwd(),
-                                client_factory=_factory))
+                                client_factory=_factory, max_turns=args.max_turns))
     print(f"run record: {path}")

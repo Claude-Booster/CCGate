@@ -71,6 +71,22 @@ def test_b0_restricts_tools_to_read():
     assert opts["allowed_tools"] == ["Read"]
 
 
+def test_max_turns_in_options_when_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    from ccgate.run.cli import _build_options
+    from ccgate.config import load_config
+    opts = _build_options([], enforce=True, config=load_config(), recorder=None, max_turns=40)
+    assert opts["max_turns"] == 40
+
+
+def test_max_turns_defaults_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    from ccgate.run.cli import _build_options
+    from ccgate.config import load_config
+    opts = _build_options([], enforce=True, config=load_config(), recorder=None)
+    assert opts["max_turns"] is None      # omitted -> no cap
+
+
 def test_no_enforce_still_grants_read_for_baseline(tmp_path, monkeypatch):
     # --no-enforce is the measurement baseline: reads must HAPPEN (no deny hook), so Read must
     # still be granted. Regression guard — the Task 7 rework gated the Read grant on enforce,
