@@ -1,10 +1,33 @@
 import asyncio
+import json
 from pathlib import Path
-from ccgate.run.policy import load_contextignore, path_is_ignored, make_read_deny_hook
+from ccgate.run.policy import (
+    load_contextignore, path_is_ignored, make_read_deny_hook, make_bash_read_deny_hook,
+)
+from ccgate.run.record import RunRecorder
 
 
 def _call(hook, tool_name, tool_input):
     return asyncio.run(hook({"tool_name": tool_name, "tool_input": tool_input}, "tuid", None))
+
+
+def _events(rec):
+    return [json.loads(l) for l in Path(rec.path).read_text(encoding="utf-8").splitlines()]
+
+
+def _bash_hook(tmp_path, monkeypatch, patterns=("*.lock",),
+               readers=("cat", "head", "tail", "less", "more", "sed", "awk")):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    rec = RunRecorder("run-b1a")
+    return make_bash_read_deny_hook(list(patterns), list(readers), rec), rec
+
+
+def _bash_call(hook, command):
+    return asyncio.run(hook({"tool_name": "Bash", "tool_input": {"command": command}}, "tuid", None))
+
+
+def _is_deny(out):
+    return out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
 
 def test_denies_ignored_read():
@@ -63,3 +86,66 @@ def test_trailing_slash_directory_segment_match():
 def test_existing_glob_and_basename_still_work():
     assert path_is_ignored("a/b/package-lock.json", ["package-lock.json"]) is True
     assert path_is_ignored("x/y/foo.min.js", ["*.min.js"]) is True
+
+
+def test_bash_deny_common_readers(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert _is_deny(_bash_call(hook, "cat foo.lock"))
+    assert _is_deny(_bash_call(hook, "head -100 foo.lock"))
+    assert _is_deny(_bash_call(hook, "sed -n 1,5p foo.lock"))
+
+
+def test_bash_allow_non_reader_and_allowed_file(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert _bash_call(hook, "rm foo.lock") == {}          # not a reader — allow
+    assert _bash_call(hook, "git add foo.lock") == {}     # not a reader — allow
+    assert _bash_call(hook, "cat app.py") == {}           # reader, allowed file — allow
+
+
+def test_bash_deny_whole_command_mixed_files(tmp_path, monkeypatch):
+    hook, rec = _bash_hook(tmp_path, monkeypatch)
+    out = _bash_call(hook, "cat a.lock b.txt")
+    assert _is_deny(out)
+    ev = [e for e in _events(rec) if e.get("rule") == "F1" and e.get("surface") == "bash"]
+    assert ev and ev[-1]["matched_token"] == "a.lock"
+
+
+def test_bash_deny_redirection_and_runner_and_quotes(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert _is_deny(_bash_call(hook, "cat foo.lock > out.txt"))
+    assert _is_deny(_bash_call(hook, "sudo cat foo.lock"))
+    assert _is_deny(_bash_call(hook, 'cat "x.lock"'))            # surrounding quotes stripped
+    assert _is_deny(_bash_call(hook, "cat C:\\repo\\foo.lock"))  # backslash normalized
+
+
+def test_reader_gate_is_first_token_equality_not_startswith(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert _bash_call(hook, "lessc styles.lock") == {}    # 'lessc' != 'less' — allow
+    assert _bash_call(hook, "catalog foo.lock") == {}     # 'catalog' != 'cat' — allow
+
+
+def test_bash_matches_read_path_on_substring(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert path_is_ignored("foo.lock.bak", ["*.lock"]) is False   # Read predicate: no match
+    assert _bash_call(hook, "cat foo.lock.bak") == {}             # Bash path agrees — allow
+
+
+def test_bash_non_bash_passthrough(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    assert asyncio.run(hook({"tool_name": "Read", "tool_input": {"file_path": "foo.lock"}}, "t", None)) == {}
+
+
+def test_bash_fail_open_increments_matcher_errors(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    # tool_input is a non-dict truthy value -> `(123 or {}).get(...)` raises -> caught, counted.
+    out = asyncio.run(hook({"tool_name": "Bash", "tool_input": 123}, "t", None))
+    assert out == {}
+    assert hook.matcher_errors == 1
+
+
+def test_bash_summary_shape(tmp_path, monkeypatch):
+    hook, _ = _bash_hook(tmp_path, monkeypatch)
+    _bash_call(hook, "cat foo.lock")
+    s = hook.summary()
+    assert s["rule"] == "F1" and s["surface"] == "bash"
+    assert s["denies"] == 1 and s["matcher_errors"] == 0
