@@ -23,12 +23,16 @@ def _build_options(patterns, enforce: bool, config: dict, recorder):
     from ccgate.run.policy import make_read_deny_hook, make_bash_read_deny_hook
     from ccgate.run.bashcap import BashCapHook
     from ccgate.run.shellcmd import compile_prefixes
-    pre, post, tools = [], [], []
+    # Tool AVAILABILITY is independent of enforce: --no-enforce is the measurement baseline and
+    # must offer the SAME tools as the enforced run (so it exercises the same task) — only the
+    # deny/truncation HOOKS are gated by enforce. Gating the Read grant on enforce would leave
+    # --no-enforce with empty tools, and the baseline could not read at all.
+    bash_on = bool(config.get("bashEnabled"))
+    tools = ["Read"] + (["Bash"] if bash_on else [])
+    pre, post = [], []
     if enforce:
         pre.append(("Read", make_read_deny_hook(patterns, recorder)))
-        tools.append("Read")
-        if config.get("bashEnabled"):
-            tools.append("Bash")
+        if bash_on:
             readers = compile_prefixes(config["bashReadPrefixes"])
             pre.append(("Bash", make_bash_read_deny_hook(patterns, readers, recorder)))
             post.append(("Bash", BashCapHook(
