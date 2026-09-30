@@ -1,0 +1,5 @@
+Add the two missing boundary test cases to tests/test_config.py for the 10,000,000 upper bound
+of bashCapHeadChars and bashCapTailChars (an out-of-range high value must fall back to the
+default), and add a `tokens_injected` field to the F3 event recorded in
+src/ccgate/run/bashcap.py (the marker's own character length). Run
+`python -m pytest tests/test_config.py tests/test_bashcap.py` and make it pass. Then stop.
