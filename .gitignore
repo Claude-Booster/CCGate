@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 
+# Editable-install build metadata
+src/ccgate.egg-info/
+
 # Restricted-identifier patterns (local only — never commit)
 .githooks/.blocked
 
