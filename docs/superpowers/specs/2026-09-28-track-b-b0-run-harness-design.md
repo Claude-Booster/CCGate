@@ -176,7 +176,20 @@ observations, both §12.9:
 2. **The shadowing** (load-bearing, its own red state) — **same config, `Read` in
    `allowed_tools`**: with the hook **absent**, the read **succeeds**; with the hook
    **present**, it is **denied**. This proves the hook fires for a pre-approved tool — the
-   reason hooks were chosen over `can_use_tool` — rather than trusting the README.
+   reason hooks were chosen over `can_use_tool` — rather than trusting the README. ccgate does
+   **not** set `permission_mode="bypassPermissions"`: `allowed_tools` already auto-approves the
+   listed tools non-interactively (verified in CI — the baseline read succeeds without bypass),
+   and leaving the SDK's default permission gate in place keeps it as a backstop behind the
+   deny hook (defense in depth). Bypass was investigated and rejected: it removes that backstop
+   and makes hook correctness the *only* boundary once `Bash` is in play, so `tools` is kept
+   explicitly minimal instead.
+
+   **CI finding — sensitive-filename guard (fixture design):** Claude Code hard-denies reading
+   files whose names look like secrets (`*secret*`, `*credential*`, `.env`, keys), independent
+   of `permission_mode` — a safety guard, not a promptable permission. An early fixture named
+   `target_secret.txt` was therefore denied in the *baseline* too, masking the shadowing proof
+   (the read looked denied with no hook). The fixture uses a neutral name (`target_marker.txt`)
+   so the **only** deny in the treatment is ccgate's own hook.
 
 **Public-repo safety (explicit):** the hook-absent red-state run *actually performs the
 Read*. The task prompt and target path are **pinned to a committed fixture file** under the
