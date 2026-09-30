@@ -2,9 +2,16 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from b1a_ci_probe import evaluate, _parse_bash_denies  # noqa: E402
+from b1a_ci_probe import evaluate, _parse_bash_denies, _contextignore_for  # noqa: E402
 
 MARK = "SENTINEL_B1A_READ_OK"
+
+
+def test_baseline_uses_empty_contextignore_not_prefix_toggle():
+    # Review Finding 1: bashReadPrefixes is list-merged, so [] can't empty it — the baseline
+    # must disable the deny via an EMPTY .contextignore instead (bashReadPrefixes stays default).
+    assert _contextignore_for(False) == ""                       # baseline: no patterns -> no deny
+    assert _contextignore_for(True).strip() == "target_marker.txt"  # treatment: real pattern -> deny
 
 
 def test_green_when_baseline_reads_and_treatment_denies():
