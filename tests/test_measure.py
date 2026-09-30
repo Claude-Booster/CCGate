@@ -38,3 +38,47 @@ def test_extract_incomplete_record_has_no_marker(tmp_path):
         "input_tokens": 1, "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0, "output_tokens": 1}}}) + "\n", encoding="utf-8")
     assert extract_run_metrics(p)["complete_marker"] is False
+
+
+from ccgate.measure import derive_n, decide
+
+
+def test_derive_n_boundaries():
+    assert derive_n(1000, 1000) == 5          # d=0 -> 5
+    assert derive_n(1000, 1090) == 5          # d~8.6% (<=10) -> 5
+    assert derive_n(1000, 1200) == 9          # d~18% (10<d<=25) -> 9
+
+
+def test_derive_n_unmeasurable():
+    assert derive_n(1000, 1300) is None       # d~26% (>25) -> None
+    assert derive_n(1000, 2000) is None       # d~67% -> None
+
+
+def test_decide_excludes_incomplete_from_median():
+    # Both arms at the SAME 3/5 completion so the completion condition passes and the test
+    # isolates the property under test: the enforced median is over COMPLETED runs only (810),
+    # not dragged toward 0 by the two incompletes.
+    base = ([{"tokens_total": t, "complete": True} for t in (1000, 1100, 1200)]
+            + [{"tokens_total": 0, "complete": False}, {"tokens_total": 0, "complete": False}])
+    enf = ([{"tokens_total": t, "complete": True} for t in (800, 820, 810)]
+           + [{"tokens_total": 0, "complete": False}, {"tokens_total": 0, "complete": False}])
+    d = decide(base, enf)   # both 60% complete -> not void; enforced median 810 < baseline min 1000
+    assert d["verdict"] == "BUILD_B1C" and d["enforced_median"] == 810
+
+
+def test_decide_void_when_low_completion():
+    base = [{"tokens_total": 100, "complete": True}] + [{"tokens_total": 0, "complete": False}] * 4
+    enf = [{"tokens_total": 50, "complete": True}] + [{"tokens_total": 0, "complete": False}] * 4
+    assert decide(base, enf)["verdict"] == "VOID"     # 1/5 each -> <=50%
+
+
+def test_decide_build_when_enforced_below_baseline_min():
+    base = [{"tokens_total": t, "complete": True} for t in (1000, 1100, 1200, 1050, 1150)]
+    enf = [{"tokens_total": t, "complete": True} for t in (800, 850, 820, 830, 810)]
+    assert decide(base, enf)["verdict"] == "BUILD_B1C"     # enforced median 820 < baseline min 1000
+
+
+def test_decide_no_build_when_within_baseline_range():
+    base = [{"tokens_total": t, "complete": True} for t in (1000, 1100, 1200, 1050, 1150)]
+    enf = [{"tokens_total": t, "complete": True} for t in (1020, 1080, 1090, 1030, 1060)]
+    assert decide(base, enf)["verdict"] == "NO_BUILD"     # enforced median 1060 >= baseline min 1000
