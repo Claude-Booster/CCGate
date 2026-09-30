@@ -97,3 +97,33 @@ def test_classify_completion():
 def test_tokens_injected_present():
     assert tokens_injected_present('event = {"rule": "F3", "tokens_injected": n}') is True
     assert tokens_injected_present('event = {"rule": "F3", "chars_elided": n}') is False
+
+
+def test_misses_per_1k_uses_real_classifier_not_creation_count(tmp_path):
+    # Every turn creates incremental cache but re-reads it all (re_processed ~ 0), so the
+    # canonical classifier (read_transcript + classify_requests, the 62/1k source) sees ZERO
+    # misses. The old cache_creations-1 approximation would wrongly report ~667/1k here.
+    lines = [
+        {"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 0,
+                                                    "cache_creation_input_tokens": 1000, "output_tokens": 5}}},
+        {"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 1000,
+                                                    "cache_creation_input_tokens": 100, "output_tokens": 5}}},
+        {"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 1100,
+                                                    "cache_creation_input_tokens": 100, "output_tokens": 5}}},
+        {"type": "ccgate_run_end"},
+    ]
+    p = tmp_path / "run.jsonl"
+    p.write_text("\n".join(json.dumps(l) for l in lines) + "\n", encoding="utf-8")
+    assert extract_run_metrics(p)["misses_per_1k"] == 0.0
+
+
+from ccgate.measure import ceiling_test_added
+
+
+def test_ceiling_test_added():
+    # base test_config.py's largest literal is 12000 (< 200_000 ceiling); an added ceiling test
+    # introduces a literal above it. Evidence the test-writing half of the task was done.
+    assert ceiling_test_added('assert load_config()["bashCapHeadChars"] == 4000') is False
+    assert ceiling_test_added('cfg.write_text("{\\"bashCapHeadChars\\": 12000}")') is False
+    assert ceiling_test_added('cfg.write_text("{\\"bashCapHeadChars\\": 10000000}")') is True
+    assert ceiling_test_added('{"bashCapTailChars": 200_001}') is True

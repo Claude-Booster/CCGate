@@ -2,21 +2,28 @@
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from pathlib import Path
+
+from ccgate.transcript import Classification, classify_requests, read_transcript
+
+_CEILING = 200_000   # bashCap*Chars upper bound (config.py _RANGE); a ceiling test exceeds it.
 
 
 def extract_run_metrics(record_path) -> dict:
     """Parse a ccgate run record (JSONL) into experiment metrics. Pure — no SDK, no subprocess.
-    misses_per_1k is a cache-miss approximation (requests that created cache beyond the first),
-    secondary and not gated (spec §2)."""
+    tokens_total/turns come from the assistant usage lines; misses_per_1k reuses the canonical
+    classifier (read_transcript + classify_requests — the same one that produced the 62/1k
+    baseline, spec §2) so it is comparable; F1/F3/complete come from the raw ccgate lines that
+    read_transcript skips."""
+    p = Path(record_path)
     tokens_total = 0
     turns = 0
     f1_fires = 0
     f3_truncations = 0
     complete_marker = False
-    cache_creations = 0
-    for line in Path(record_path).read_text(encoding="utf-8").splitlines():
+    for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -33,8 +40,6 @@ def extract_run_metrics(record_path) -> dict:
                    + u.get("cache_creation_input_tokens", 0))
             tokens_total += gti + u.get("output_tokens", 0)
             turns += 1
-            if u.get("cache_creation_input_tokens", 0) > 0:
-                cache_creations += 1
             continue
         if ev.get("type") == "ccgate_event" and not ev.get("summary"):
             if ev.get("rule") == "F1":
@@ -44,8 +49,10 @@ def extract_run_metrics(record_path) -> dict:
             continue
         if ev.get("type") == "ccgate_run_end":
             complete_marker = True
-    misses = max(0, cache_creations - 1)   # the first request always creates cache
-    misses_per_1k = (misses / turns * 1000) if turns else 0.0
+    # misses via the canonical classifier (continuity with the 62/1k baseline).
+    requests = read_transcript(p)
+    misses = sum(1 for _, c in classify_requests(requests) if c == Classification.MISS)
+    misses_per_1k = (misses / len(requests) * 1000) if requests else 0.0
     return {"tokens_total": tokens_total, "turns": turns, "f1_fires": f1_fires,
             "f3_truncations": f3_truncations, "misses_per_1k": misses_per_1k,
             "complete_marker": complete_marker}
@@ -108,3 +115,17 @@ def tokens_injected_present(bashcap_source: str) -> bool:
     """True if the F3 event in bashcap source records the tokens_injected field (done-condition
     part 2). A cheap textual check — the harness's pytest run is the real done gate (spec §4)."""
     return "tokens_injected" in bashcap_source
+
+
+def ceiling_test_added(test_config_source: str) -> bool:
+    """True if test_config.py contains an integer literal above the 200_000 bashCap*Chars
+    ceiling — evidence the 10M-boundary fallback test was actually added (the base file's
+    largest literal is 12000). Closes the done-gate hole where pytest is green because the
+    base tests pass, without the agent having written the requested boundary tests (spec §4)."""
+    for m in re.findall(r"\d[\d_]*", test_config_source):
+        try:
+            if int(m.replace("_", "")) > _CEILING:
+                return True
+        except ValueError:
+            continue
+    return False

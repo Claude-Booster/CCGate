@@ -4,6 +4,8 @@ Variance check (2 enforced runs) -> derive N -> A/B (N/arm) with a per-run turn 
 clean-tree reset before each run -> harness-run done-check -> pre-declared verdict. Runs cost
 real tokens; the turn cap bounds a pathological run. The done-check shells out to pytest from
 here — never trusts the agent's own report (spec §4)."""
+import os
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ccgate.measure import (  # noqa: E402
     extract_run_metrics, derive_n, decide, classify_completion, tokens_injected_present,
+    ceiling_test_added,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -30,6 +33,11 @@ def assemble_report(baseline: list[dict], enforced: list[dict], diag: dict) -> d
 
 
 def _reset_tree(base_sha: str) -> None:
+    # DESTRUCTIVE (git reset --hard + git clean). Refuse outside CI so a local invocation can't
+    # silently wipe a developer's working tree (review Finding 4).
+    if not os.environ.get("CI"):
+        raise RuntimeError("measure_ab is CI-only: it hard-resets the working tree. "
+                           "Set CI=1 to confirm you are in a disposable checkout.")
     subprocess.run(["git", "reset", "--hard", base_sha], cwd=str(REPO), check=True,
                    capture_output=True, text=True)
     subprocess.run(["git", "clean", "-fdq", "src", "tests"], cwd=str(REPO), check=True,
@@ -37,12 +45,17 @@ def _reset_tree(base_sha: str) -> None:
 
 
 def _done_ok() -> bool:
+    """Harness-run done-check (spec §4): the AGENT's report is ignored. Requires (a) the target
+    tests pass, (b) the boundary (ceiling) test was actually added to test_config.py, and (c)
+    the tokens_injected field was added to the F3 event — so 'green' implies the work was done,
+    not that the pre-existing base tests still pass (review Finding 1)."""
     r = subprocess.run([sys.executable, "-m", "pytest", *DONE_TESTS, "-q"],
                        cwd=str(REPO), capture_output=True, text=True)
     if r.returncode != 0:
         return False
-    src = (REPO / "src" / "ccgate" / "run" / "bashcap.py").read_text(encoding="utf-8")
-    return tokens_injected_present(src)
+    bashcap = (REPO / "src" / "ccgate" / "run" / "bashcap.py").read_text(encoding="utf-8")
+    test_config = (REPO / "tests" / "test_config.py").read_text(encoding="utf-8")
+    return tokens_injected_present(bashcap) and ceiling_test_added(test_config)
 
 
 def _one_run(enforce: bool, base_sha: str) -> dict:
@@ -75,8 +88,13 @@ def main() -> int:
         return 0
     enforced = [v1, v2] + [_one_run(True, base_sha) for _ in range(max(0, n - 2))]
     baseline = [_one_run(False, base_sha) for _ in range(n)]
+    e_done = [r for r in enforced if r["complete"]]
     diag = {"f1_fires_total": sum(r["f1_fires"] for r in enforced),
-            "f3_truncations_total": sum(r["f3_truncations"] for r in enforced)}
+            "f3_truncations_total": sum(r["f3_truncations"] for r in enforced),
+            "enforced_median_turns": statistics.median(r["turns"] for r in e_done) if e_done else None,
+            "enforced_median_misses_per_1k": statistics.median(r["misses_per_1k"] for r in e_done) if e_done else None,
+            "enforced_reasons": [r["reason"] for r in enforced],
+            "baseline_reasons": [r["reason"] for r in baseline]}
     rep = assemble_report(baseline, enforced, diag)
     _reset_tree(base_sha)   # leave the tree clean
     print(f"VERDICT: {rep['verdict']} — {rep['reason']}")
