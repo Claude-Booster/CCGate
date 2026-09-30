@@ -71,6 +71,19 @@ def test_b0_restricts_tools_to_read():
     assert opts["allowed_tools"] == ["Read"]
 
 
+def test_no_enforce_still_grants_read_for_baseline(tmp_path, monkeypatch):
+    # --no-enforce is the measurement baseline: reads must HAPPEN (no deny hook), so Read must
+    # still be granted. Regression guard — the Task 7 rework gated the Read grant on enforce,
+    # leaving --no-enforce with empty tools (B0 red state PROBE_RED_READ_HAPPENED=False).
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    from ccgate.run.cli import _build_options
+    from ccgate.config import load_config
+    opts = _build_options([], enforce=False, config=load_config(), recorder=None)
+    assert opts["tools"] == ["Read"]
+    assert opts["allowed_tools"] == ["Read"]
+    assert opts["hooks"]["PreToolUse"] == []   # baseline has no deny hook
+
+
 def test_bashenabled_wires_two_pretooluse_matchers(tmp_path, monkeypatch):
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
     (tmp_path / ".contextignore").write_text("*.lock\n", encoding="utf-8")
