@@ -5,7 +5,10 @@ Green state: enforced (hook present, Read allowed, same config) → the read is 
 Proves the hook overrides allowed_tools, not just that some deny exists.
 
 Runs `ccgate run` with cwd = the fixture dir, so load_contextignore reads the fixture's own
-.contextignore (which lists target_secret.txt). The target is a committed fixture — never a real path.
+.contextignore (which lists target_marker.txt). The target is a committed fixture — never a real path.
+NOTE: the fixture is deliberately NOT named with 'secret'/'credential'/etc — Claude Code's built-in
+sensitive-file guard hard-denies such reads regardless of permission_mode, which would confound the
+baseline (would look denied even with no hook). A neutral name isolates OUR hook as the only deny.
 
 MUST RUN IN CI (token principal), not on the interactive-login dev machine. Verified 2026-09-28:
 on-desk, the enterprise org filesystem sandbox blocks the BASELINE read regardless of tools/
