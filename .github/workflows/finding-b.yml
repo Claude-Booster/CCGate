@@ -1,0 +1,16 @@
+name: finding-b
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: pip install -e ".[run,dev]"
+      - run: git config user.email "ci@example.com" && git config user.name "ci"
+      - name: Finding B — unattended completion at max-turns 80
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: python scripts/finding_b_probe.py
