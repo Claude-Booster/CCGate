@@ -66,9 +66,26 @@ def test_b0_restricts_tools_to_read():
     and is blocked before using Read; and it would leave a non-Read bypass of the deny (review #3)."""
     from ccgate.run.cli import _build_options
     from ccgate.config import load_config
-    opts = _build_options([], enforce=True, config=load_config(), bashcap_hook=None)
+    opts = _build_options([], enforce=True, config=load_config(), recorder=None)
     assert opts["tools"] == ["Read"]
     assert opts["allowed_tools"] == ["Read"]
+
+
+def test_bashenabled_wires_two_pretooluse_matchers(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    (tmp_path / ".contextignore").write_text("*.lock\n", encoding="utf-8")
+    (tmp_path / "config.json").write_text('{"bashEnabled": true}', encoding="utf-8")
+    asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
+    opts = _FakeClient.last_options
+    assert len(opts["hooks"]["PreToolUse"]) == 2      # read deny + bash-read deny
+    assert "Bash" in opts["tools"]
+
+
+def test_disabled_has_single_read_matcher(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    (tmp_path / ".contextignore").write_text("*.lock\n", encoding="utf-8")
+    asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
+    assert len(_FakeClient.last_options["hooks"]["PreToolUse"]) == 1   # read deny only
 
 
 def test_bashcap_disabled_by_default_no_bash_tool(tmp_path, monkeypatch):
@@ -121,12 +138,14 @@ def _sdk_installed():
 
 
 @pytest.mark.skipif(not _sdk_installed(), reason="claude-agent-sdk not installed")
-def test_factory_builds_real_sdk_options():
+def test_factory_builds_two_pretooluse_matchers():
     """The translation seam (raw dict -> ClaudeAgentOptions/HookMatcher) must not drift from the
-    SDK signatures. Constructing options needs no auth/network — catch drift here, not in CI."""
+    SDK signatures — including two PreToolUse matchers (Read+Bash), the B0-untested shape.
+    Constructing options needs no auth/network — catch drift here, not in CI."""
     from ccgate.run.cli import _build_options, _factory
     from ccgate.config import load_config
     cfg = load_config()
-    # Both enforce states must build a real client without raising:
-    assert _factory(_build_options(["secrets/*.txt"], enforce=True, config=cfg, bashcap_hook=None)) is not None
-    assert _factory(_build_options([], enforce=False, config=cfg, bashcap_hook=None)) is not None
+    cfg["bashEnabled"] = True
+    # bashEnabled -> two raw PreToolUse callbacks -> two HookMatchers; must construct without raising:
+    assert _factory(_build_options(["*.lock"], enforce=True, config=cfg, recorder=None)) is not None
+    assert _factory(_build_options([], enforce=False, config=cfg, recorder=None)) is not None

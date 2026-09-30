@@ -8,21 +8,33 @@ import sys
 from pathlib import Path
 
 from ccgate.config import load_config
-from ccgate.run.bashcap import BashCapHook, compile_prefixes
-from ccgate.run.policy import load_contextignore, make_read_deny_hook
+from ccgate.run.policy import load_contextignore
 from ccgate.run.record import RunRecorder, make_run_id
 
 
-def _build_options(patterns, enforce: bool, config: dict, bashcap_hook):
+def _build_options(patterns, enforce: bool, config: dict, recorder):
     """Dict-like config the client_factory consumes. NO SDK import here — keeps run_task
-    and the in-process fake-client tests SDK-free. PreToolUse holds the RAW F1 callback and
-    PostToolUse the RAW F3 callback; the real _factory wraps each in a HookMatcher (spec §7).
+    and the in-process fake-client tests SDK-free. PreToolUse/PostToolUse hold (matcher, raw
+    callback) tuples; the real _factory wraps each in a HookMatcher (spec §7).
 
-    B0 grants only Read (availability + auto-approve). B1b adds Bash — availability AND
-    auto-approve — only when F3 is active, so F3 can see Bash output to truncate it."""
-    pre = [make_read_deny_hook(patterns)] if enforce else []
-    post = [bashcap_hook] if (enforce and bashcap_hook is not None) else []
-    tools = ["Read"] + (["Bash"] if post else [])
+    B0 grants only Read. When bashEnabled (spec §4), Bash is granted and BOTH the F1 Bash-read
+    deny (PreToolUse) and F3 truncation (PostToolUse) register — each self-gates on its prefix
+    list. `tools` is kept minimal: under the model, only listed tools are available."""
+    from ccgate.run.policy import make_read_deny_hook, make_bash_read_deny_hook
+    from ccgate.run.bashcap import BashCapHook
+    from ccgate.run.shellcmd import compile_prefixes
+    pre, post, tools = [], [], []
+    if enforce:
+        pre.append(("Read", make_read_deny_hook(patterns, recorder)))
+        tools.append("Read")
+        if config.get("bashEnabled"):
+            tools.append("Bash")
+            readers = compile_prefixes(config["bashReadPrefixes"])
+            pre.append(("Bash", make_bash_read_deny_hook(patterns, readers, recorder)))
+            post.append(("Bash", BashCapHook(
+                compile_prefixes(config["bashCapPrefixes"]),
+                config["bashCapHeadChars"], config["bashCapTailChars"],
+                config["bashCapDebugLoopCalls"], recorder)))
     return {
         "hooks": {"PreToolUse": pre, "PostToolUse": post},
         "setting_sources": [],
@@ -33,15 +45,16 @@ def _build_options(patterns, enforce: bool, config: dict, bashcap_hook):
 
 def _factory(options):
     """Real-SDK client factory: translate the raw-callback dict → ClaudeAgentOptions/HookMatcher.
-    All SDK imports are confined here so run_task/_build_options stay SDK-free and testable."""
+    One HookMatcher per (matcher, callback); multiple matchers on one event are supported and
+    run concurrently in the CLI (spec §2). All SDK imports are confined here."""
     from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
-    pre = options["hooks"]["PreToolUse"]
-    post = options["hooks"]["PostToolUse"]
     hooks = {}
+    pre = [HookMatcher(matcher=m, hooks=[cb]) for m, cb in options["hooks"]["PreToolUse"]]
+    post = [HookMatcher(matcher=m, hooks=[cb]) for m, cb in options["hooks"]["PostToolUse"]]
     if pre:
-        hooks["PreToolUse"] = [HookMatcher(matcher="Read", hooks=pre)]
+        hooks["PreToolUse"] = pre
     if post:
-        hooks["PostToolUse"] = [HookMatcher(matcher="Bash", hooks=post)]
+        hooks["PostToolUse"] = post
     return ClaudeSDKClient(options=ClaudeAgentOptions(
         hooks=hooks,
         setting_sources=options["setting_sources"],
@@ -56,18 +69,14 @@ async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory
         config = load_config(str(cwd))
     patterns = load_contextignore(cwd)
     recorder = RunRecorder(make_run_id(str(cwd)))
-    bashcap_hook = None
-    if enforce and config.get("bashEnabled"):
-        bashcap_hook = BashCapHook(
-            compile_prefixes(config["bashCapPrefixes"]),
-            config["bashCapHeadChars"], config["bashCapTailChars"],
-            config["bashCapDebugLoopCalls"], recorder)
-    options = _build_options(patterns, enforce, config, bashcap_hook)
+    options = _build_options(patterns, enforce, config, recorder)
+    # Stateful hooks (bash-read deny, bashcap) expose summary(); the read-deny closure does not.
+    summaries = [cb for _, cb in options["hooks"]["PostToolUse"]]
+    summaries += [cb for _, cb in options["hooks"]["PreToolUse"] if hasattr(cb, "summary")]
     async with client_factory(options=options) as client:
         await client.query(task_prompt)
         async for msg in client.receive_response():
-            # Stream the assistant's text blocks to stdout (spec §3 streaming; the probe
-            # detects whether the read happened by the echoed content appearing here).
+            # Stream the assistant's text blocks to stdout (spec §3 streaming).
             for block in (getattr(msg, "content", None) or []):
                 text = getattr(block, "text", None)
                 if text:
@@ -76,8 +85,8 @@ async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory
             usage = getattr(msg, "usage", None)
             if model is not None and usage is not None:
                 recorder.append_assistant(model, usage)
-    if bashcap_hook is not None:
-        recorder.append_event(bashcap_hook.summary())   # F3 run summary (spec §6)
+    for h in summaries:
+        recorder.append_event(h.summary())   # F1/F3 run summaries (spec §6)
     recorder.finish()
     return recorder.path
 
