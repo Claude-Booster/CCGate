@@ -31,11 +31,12 @@ DEFAULTS: dict = {
     "pinnedEffort": None,
     "skillListingBudgetFraction": 0.01,
     "bashRewriteRules": [],
-    "bashCapEnabled": False,
+    "bashEnabled": False,
     "bashCapHeadChars": 4000,
     "bashCapTailChars": 12000,
     "bashCapDebugLoopCalls": 3,
     "bashCapPrefixes": ["pytest", "cargo test", "jest", "go test", "npm test", "mvn test"],
+    "bashReadPrefixes": ["cat", "head", "tail", "less", "more", "sed", "awk"],
     "startupTokenCap": 12000,
     "otelPort": 4318,
     "digestMaxPaths": 500,
@@ -64,7 +65,7 @@ _RANGE: dict[str, tuple] = {
 }
 
 # Config keys whose value is a list merged (project appends to global), not replaced.
-_LIST_KEYS = ("bashRewriteRules", "bashCapPrefixes")
+_LIST_KEYS = ("bashRewriteRules", "bashCapPrefixes", "bashReadPrefixes")
 
 def load_config(cwd: str | None = None) -> dict:
     """Load merged config: global ~/.ccgate/config.json + optional project .ccgate/config.json.

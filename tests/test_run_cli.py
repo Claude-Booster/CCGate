@@ -72,7 +72,7 @@ def test_b0_restricts_tools_to_read():
 
 
 def test_bashcap_disabled_by_default_no_bash_tool(tmp_path, monkeypatch):
-    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))       # no config → bashCapEnabled False
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))       # no config → bashEnabled False
     asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
     opts = _FakeClient.last_options
     assert "Bash" not in opts["allowed_tools"]
@@ -81,7 +81,7 @@ def test_bashcap_disabled_by_default_no_bash_tool(tmp_path, monkeypatch):
 
 def test_bashcap_enabled_adds_bash_and_posttool_hook(tmp_path, monkeypatch):
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    (tmp_path / "config.json").write_text('{"bashCapEnabled": true}', encoding="utf-8")
+    (tmp_path / "config.json").write_text('{"bashEnabled": true}', encoding="utf-8")
     asyncio.run(run_task("t", enforce=True, cwd=tmp_path, client_factory=_FakeClient))
     opts = _FakeClient.last_options
     assert "Bash" in opts["allowed_tools"] and "Bash" in opts["tools"]
