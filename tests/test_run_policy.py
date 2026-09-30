@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from ccgate.run.policy import (
     load_contextignore, path_is_ignored, make_read_deny_hook, make_bash_read_deny_hook,
+    first_matching_pattern,
 )
 from ccgate.run.record import RunRecorder
 
@@ -149,3 +150,32 @@ def test_bash_summary_shape(tmp_path, monkeypatch):
     s = hook.summary()
     assert s["rule"] == "F1" and s["surface"] == "bash"
     assert s["denies"] == 1 and s["matcher_errors"] == 0
+
+
+def test_first_matching_pattern():
+    assert first_matching_pattern("a/foo.lock", ["*.txt", "*.lock"]) == "*.lock"
+    assert first_matching_pattern("a/app.py", ["*.lock"]) is None
+
+
+def test_read_deny_records_event_when_recorder_given(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    r = RunRecorder("run-read")
+    read_hook = make_read_deny_hook(["*.lock"], recorder=r)
+    out = asyncio.run(read_hook({"tool_name": "Read", "tool_input": {"file_path": "a/foo.lock"}}, "t", None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    ev = [e for e in _events(r) if e.get("rule") == "F1" and e.get("surface") == "read"]
+    assert ev and ev[-1]["matched_pattern"] == "*.lock" and ev[-1]["matched_token"] == "a/foo.lock"
+
+
+def test_read_deny_recorder_none_still_denies(tmp_path, monkeypatch):
+    monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
+    read_hook = make_read_deny_hook(["*.lock"])  # no recorder — B0 call site
+    out = asyncio.run(read_hook({"tool_name": "Read", "tool_input": {"file_path": "a/foo.lock"}}, "t", None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_bash_deny_records_matched_pattern(tmp_path, monkeypatch):
+    hook, rec = _bash_hook(tmp_path, monkeypatch)
+    _bash_call(hook, "cat foo.lock")
+    ev = [e for e in _events(rec) if e.get("rule") == "F1" and e.get("surface") == "bash"]
+    assert ev[-1]["matched_pattern"] == "*.lock"

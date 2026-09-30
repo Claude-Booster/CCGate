@@ -43,22 +43,37 @@ def path_is_ignored(path: str, patterns: list[str]) -> bool:
     return False
 
 
-def make_read_deny_hook(patterns: list[str]):
+def first_matching_pattern(path: str, patterns: list[str]) -> str | None:
+    """The first pattern that makes path ignored, or None. Uses path_is_ignored per pattern
+    so it agrees exactly with the deny decision."""
+    for pat in patterns:
+        if path_is_ignored(path, [pat]):
+            return pat
+    return None
+
+
+def make_read_deny_hook(patterns: list[str], recorder=None):
     """Build an async PreToolUse callback that denies Read of a .contextignore'd path.
 
     Signature matches claude-agent-sdk hooks: (input_data, tool_use_id, context) -> dict.
-    Deny dict shape is the SDK's hookSpecificOutput; {} means allow (spec §3).
-    """
+    Deny dict shape is the SDK's hookSpecificOutput; {} means allow (spec §3). When a recorder
+    is given, records an F1 read event on deny (recorder=None keeps B0 call sites unchanged)."""
     async def _hook(input_data: dict, tool_use_id, context) -> dict:
         if input_data.get("tool_name") != "Read":
             return {}
         target = (input_data.get("tool_input") or {}).get("file_path", "")
         if target and path_is_ignored(target, patterns):
+            if recorder is not None:
+                recorder.append_event({
+                    "type": "ccgate_event", "rule": "F1", "surface": "read",
+                    "matched_pattern": first_matching_pattern(target, patterns),
+                    "matched_token": target,
+                })
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": f"{target} is listed in .contextignore",
+                    "permissionDecisionReason": _COST_REASON.format(tok=target),
                 }
             }
         return {}
@@ -91,6 +106,7 @@ class BashReadDeny:
                     self.recorder.append_event({
                         "type": "ccgate_event", "rule": "F1", "surface": "bash",
                         "command_prefix": command[:40],
+                        "matched_pattern": first_matching_pattern(tok, self.patterns),
                         "matched_token": tok,
                     })
                     return {"hookSpecificOutput": {
