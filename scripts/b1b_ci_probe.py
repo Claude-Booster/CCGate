@@ -44,13 +44,13 @@ def evaluate(base_rc: int, base_truncations: int, treat_rc: int, treat_truncatio
 
 
 def _run(enabled: bool) -> tuple[int, str]:
-    # bashCapEnabled is config-only (no bool env override); write/remove a project config
+    # bashEnabled is config-only (no bool env override); write/remove a project config
     # around each run. Prefix must match the fixture command so the 50k-char output is capped.
     cfgdir = FIX / ".ccgate"
     cfgfile = cfgdir / "config.json"
     if enabled:
         cfgdir.mkdir(exist_ok=True)
-        cfgfile.write_text(json.dumps({"bashCapEnabled": True, "bashCapPrefixes": ["python -c"]}),
+        cfgfile.write_text(json.dumps({"bashEnabled": True, "bashCapPrefixes": ["python -c"]}),
                            encoding="utf-8")
     elif cfgfile.exists():
         cfgfile.unlink()

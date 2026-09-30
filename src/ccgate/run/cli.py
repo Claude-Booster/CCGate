@@ -57,7 +57,7 @@ async def run_task(task_prompt: str, *, enforce: bool, cwd: Path, client_factory
     patterns = load_contextignore(cwd)
     recorder = RunRecorder(make_run_id(str(cwd)))
     bashcap_hook = None
-    if enforce and config.get("bashCapEnabled"):
+    if enforce and config.get("bashEnabled"):
         bashcap_hook = BashCapHook(
             compile_prefixes(config["bashCapPrefixes"]),
             config["bashCapHeadChars"], config["bashCapTailChars"],
