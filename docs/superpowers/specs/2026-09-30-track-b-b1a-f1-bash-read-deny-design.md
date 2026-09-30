@@ -21,6 +21,10 @@ Close the completeness gap where a `.contextignore`'d file — meant to be kept 
 
 The Bash matcher **misses** `python -c "print(open('x').read())"`, `grep . x`, `od -c x`, `base64 x`, `while read l; do … done < x`, `tar cf - x`, `sh -c 'cat x'`, redirection-based reads, and anything else that reads a file without a recognized reader prefix. Enumerating the ways a shell reads a file is a non-goal — B1b established that parsing shell grammar is a trap. **On a miss, do nothing:** a creative reader wastes some tokens, which is exactly the cost that existed before F1. No escalation, no attempt to "harden."
 
+**Quoted paths with spaces:** `cat "my file.lock"` is whitespace-split into `"my` and `file.lock"`. B1a strips surrounding quotes per token (§5), so a glob like `*.lock` still matches `file.lock` — but a `.contextignore` pattern that *itself contains a space* will not match, because tokenization has already split the path. A documented miss, acceptable for a best-effort feature.
+
+**B1a's real value** is closing the case where the model reaches for `cat`/`head`/`sed` on a literal path out of habit — the obvious path. It is *not* a meaningful reduction in the number of ways a file can reach context. The success criteria are scoped to the habitual-reader case deliberately; the plan must not drift into `grep`/redirection handling.
+
 ## 2. Mechanism
 
 A **PreToolUse hook with `matcher="Bash"`** returning `permissionDecision: "deny"`. This is the same deny primitive B0 uses for Read; B1a adds a second matcher on the same event. The two PreToolUse matchers (`Read`, `Bash`) target different tools, so a given tool call matches exactly one — the SDK runs multiple matchers on one event concurrently, and there is no ordering or interaction hazard here.
@@ -48,8 +52,8 @@ A **PreToolUse hook with `matcher="Bash"`** returning `permissionDecision: "deny
   - Normalize the input path `\` → `/` **inside this function**, so every caller (Read and Bash) inherits it.
   - Existing glob semantics (fnmatch on full path OR basename) retained.
   - **Trailing-`/` directory rule:** a pattern `X/` matches iff `X` is a complete path segment, computed as `("/" + normalized_path + "/")` containing `"/" + X + "/"`. Matches the dir and everything beneath at any depth (`node_modules/foo`, `src/node_modules/bar`); excludes substrings (`mynode_modules/x`).
-- `make_read_deny_hook(patterns, recorder)` — **now takes the recorder** and records an F1 Read-deny event on deny (see §6). Otherwise unchanged; inherits richer matching for free.
-- `make_bash_read_deny_hook(patterns, reader_prefixes, recorder)` (new) — PreToolUse Bash callback; algorithm in §5.
+- `make_read_deny_hook(patterns, recorder=None)` — recorder is **optional and defaults to `None`** so B0's existing call site and tests keep working unchanged; when a recorder is provided it records an F1 Read-deny event on deny (see §6). Otherwise unchanged; inherits richer matching for free.
+- `make_bash_read_deny_hook(patterns, reader_prefixes, recorder)` (new) — a **stateful** PreToolUse Bash callback (like `BashCapHook`) that owns the `matcher_errors` counter and the bash deny count and exposes `summary()`; algorithm in §5.
 
 ### `config.py`
 - **Rename** `bashCapEnabled` → `bashEnabled` (master switch: grants Bash + registers *both* the F1 Bash-read deny and F3 truncation). `bashCap*` (head/tail/debug-loop/prefixes) remain the **truncation knobs beneath it**.
@@ -66,6 +70,7 @@ strip runner prefixes → effective command
 if not command_matches(effective, reader_prefixes):  return {}   # not a reader → allow
 tokens = effective.split()                                        # whitespace only; no shell parse
 for tok in tokens:
+    tok = tok.strip("'\"")                                        # strip surrounding quotes: cat "x.lock"
     if path_is_ignored(tok, patterns):                           # normalizes \→/, trailing-/ rule
         record F1 bash-deny event (matched_pattern, matched_token)
         return deny(cost-excluded reason)
@@ -89,7 +94,9 @@ Backfilling Read-deny recording is in scope: a ledger with Bash denies but not R
 
 ## 7. Error handling
 
-Fail-open, like `BashCapHook`: the matcher body is wrapped so any exception returns `{}` — a best-effort efficiency feature must never crash a run; a miss is cheaper than a crash. **But not silently:** increment a `matcher_errors` counter surfaced in the run summary. Silent wrong answers are this project's whole failure history; the counter turns a broken matcher into a visible signal instead of an invisible miss.
+Fail-open, like `BashCapHook`: the matcher body is wrapped so any exception returns `{}` — a best-effort efficiency feature must never crash a run; a miss is cheaper than a crash. **But not silently:** increment a `matcher_errors` counter. Silent wrong answers are this project's whole failure history; the counter turns a broken matcher into a visible signal instead of an invisible miss.
+
+**Owner:** `matcher_errors` lives on the stateful Bash-read matcher object (§4), the same place `BashCapHook` keeps its per-run counters; `run_task` calls the matcher's `summary()` at finish to append the F1 bash summary event (deny count + `matcher_errors`) to the `RunRecorder`, exactly as F3 does. **Order:** the `except` handler increments `matcher_errors` *first*, then returns `{}` — so a caught exception always produces both, never one without the other.
 
 Empty `.contextignore` or empty `bashReadPrefixes` → no-op `{}`. Malformed/absent command → no match → allow. `bashReadPrefixes` with regex metachars → `ValueError` at config load via `compile_prefixes`.
 
@@ -102,7 +109,8 @@ Bash call: model emits `command` → PreToolUse Bash matcher → `strip_runner_p
 **In-process (agent-runnable, no auth):**
 - `strip_runner_prefixes`: `sudo cat x`, `sudo -u foo cat x`, `env FOO=1 cat x`, bare `env cat x`, `time cat x`, `command cat x`, `nice cat x`, recursive `sudo env FOO=1 cat x`, iteration cap — **plus B1b's inputs** (`sudo pytest`, `env CI=1 cargo test`, `time npm test`) so the B1b retrofit is later a one-line call change.
 - `path_is_ignored` richer: trailing-`/` segment match (`node_modules/` hits `node_modules/foo`, `src/node_modules/bar`; misses `mynode_modules/x`), `\`→`/` normalization, existing globs and `#` comments.
-- `make_bash_read_deny_hook`: `cat <ignored>`→deny; `cat <allowed>`→allow; `head -100 <ignored>`→deny; `sed -n 1,5p <ignored>`→deny; `rm <ignored>`→allow (not a reader); `cat a.lock b.txt`→deny-whole (`matched_token`==`a.lock`); `cat foo.lock > out.txt`→deny; `sudo cat <ignored>`→deny; non-Bash→`{}`; **substring `foo.lock.bak` vs `*.lock`** asserting token-match == Read-match (same predicate); **backslash `cat C:\repo\foo.lock` vs `*.lock`**→deny; fail-open on an injected exception (returns `{}` and increments `matcher_errors`).
+- `make_bash_read_deny_hook`: `cat <ignored>`→deny; `cat <allowed>`→allow; `head -100 <ignored>`→deny; `sed -n 1,5p <ignored>`→deny; `rm <ignored>`→allow (not a reader); `cat a.lock b.txt`→deny-whole (`matched_token`==`a.lock`); `cat foo.lock > out.txt`→deny; `sudo cat <ignored>`→deny; **quoted `cat "x.lock"` vs `*.lock`**→deny (surrounding quotes stripped); non-Bash→`{}`; **substring `foo.lock.bak` vs `*.lock`** asserting token-match == Read-match (same predicate); **backslash `cat C:\repo\foo.lock` vs `*.lock`**→deny; fail-open on an injected exception asserts **both** hold — returns `{}` **and** `matcher_errors` incremented (except handler increments before returning).
+- `make_read_deny_hook`: with `recorder=None` (B0 call site) denies and its existing tests pass unchanged; with a recorder, writes the F1 read event on deny.
 - Recording: Read deny and Bash deny both write their event; summary counts both surfaces + `matcher_errors`.
 - Wiring: `bashEnabled` registers two PreToolUse matchers + PostToolUse; disabled → Read matcher only, no Bash tool. **Factory-drift: `_factory` builds real `ClaudeAgentOptions` with two PreToolUse `HookMatcher`s** (the B0-untested seam).
 - Config: `bashReadPrefixes` default + metachar rejection; `bashEnabled` rename consumed by `run_task`.
