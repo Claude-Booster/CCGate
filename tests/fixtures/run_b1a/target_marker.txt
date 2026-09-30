@@ -1,0 +1,1 @@
+FIXTURE-ONLY marker content: SENTINEL_B1A_READ_OK. Nothing real here.
