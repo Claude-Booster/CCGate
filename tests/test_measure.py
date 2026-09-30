@@ -82,3 +82,18 @@ def test_decide_no_build_when_within_baseline_range():
     base = [{"tokens_total": t, "complete": True} for t in (1000, 1100, 1200, 1050, 1150)]
     enf = [{"tokens_total": t, "complete": True} for t in (1020, 1080, 1090, 1030, 1060)]
     assert decide(base, enf)["verdict"] == "NO_BUILD"     # enforced median 1060 >= baseline min 1000
+
+
+from ccgate.measure import classify_completion, tokens_injected_present
+
+
+def test_classify_completion():
+    assert classify_completion(True, 0, False) == (True, "ok")
+    assert classify_completion(False, 0, True) == (False, "turn_cap")
+    assert classify_completion(False, 1, False) == (False, "error")
+    assert classify_completion(False, 0, False) == (False, "gave_up")
+
+
+def test_tokens_injected_present():
+    assert tokens_injected_present('event = {"rule": "F3", "tokens_injected": n}') is True
+    assert tokens_injected_present('event = {"rule": "F3", "chars_elided": n}') is False
