@@ -9,3 +9,7 @@ src/ccgate.egg-info/
 
 # Internal planning artifacts (may contain machine-specific paths)
 docs/superpowers/plans/
+
+# Subagent-driven-development scratch workspace (local only; review diffs
+# contain machine-specific paths/identifiers — never commit)
+.superpowers/
