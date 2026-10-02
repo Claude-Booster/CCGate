@@ -11,6 +11,7 @@ from ccgate.scripts.shape import (
     _check_cache_ttl, _check_deny_reads, _check_worktree_sparse,
     _check_output_caps, _load_settings,
 )
+from ccgate.scripts.shape import _check_large_read_sinks, stage_fixes
 
 
 class TestClaudemdLines:
@@ -186,6 +187,98 @@ class TestDenyReads:
         settings = {"permissions": {"deny": ["Read(**/*.generated.*/***)"]}}
         findings = _check_deny_reads(str(tmp_path), settings)
         assert not any(f["check"] == "denyReads" for f in findings)
+
+
+class TestLargeReadSinks:
+    """Warn-only (never auto-fixed) large lockfiles + bundles."""
+
+    CFG = {"denyReadsMinBytes": 1000}
+
+    def test_large_lockfile_flagged_with_suggested_rule(self, tmp_path):
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        hits = [f for f in findings if f["check"] == "denyReads"]
+        assert hits and hits[0]["severity"] == "warning"
+        assert "Read(**/pnpm-lock.yaml)" in hits[0]["message"]
+
+    def test_small_lockfile_not_flagged(self, tmp_path):
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 100)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        assert not findings
+
+    def test_lockfile_already_denied_not_flagged(self, tmp_path):
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        settings = {"permissions": {"deny": ["Read(**/pnpm-lock.yaml)"]}}
+        findings = _check_large_read_sinks(str(tmp_path), settings, self.CFG)
+        assert not findings
+
+    def test_large_minjs_outside_dist_flagged(self, tmp_path):
+        (tmp_path / "public").mkdir()
+        (tmp_path / "public" / "lib.min.js").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        hits = [f for f in findings if f["check"] == "denyReads"]
+        assert hits and "min.js" in hits[0]["message"]
+
+    def test_bundle_specific_rule_does_not_suppress_other_bundle(self, tmp_path):
+        # a deny rule for one .min.js must NOT mark every .min.js as covered
+        (tmp_path / "public").mkdir()
+        (tmp_path / "public" / "app.min.js").write_text("x" * 2000)
+        settings = {"permissions": {"deny": ["Read(vendor/jquery.min.js)"]}}
+        findings = _check_large_read_sinks(str(tmp_path), settings, self.CFG)
+        assert any(f["check"] == "denyReads" for f in findings)
+
+    def test_lockfile_specific_path_rule_does_not_suppress_other(self, tmp_path):
+        # denying one package's lockfile must NOT suppress a different lockfile
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        settings = {"permissions": {"deny": ["Read(packages/a/pnpm-lock.yaml)"]}}
+        findings = _check_large_read_sinks(str(tmp_path), settings, self.CFG)
+        assert any(f["check"] == "denyReads" for f in findings)
+
+    def test_lockfile_exact_path_rule_suppresses_that_file(self, tmp_path):
+        # denying the exact file being scanned DOES cover it
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        settings = {"permissions": {"deny": ["Read(pnpm-lock.yaml)"]}}
+        findings = _check_large_read_sinks(str(tmp_path), settings, self.CFG)
+        assert not findings
+
+    def test_minjs_inside_dist_not_flagged(self, tmp_path):
+        # dist/ is already auto-denied by the existing denyReads fix — don't double-report
+        (tmp_path / "dist").mkdir()
+        (tmp_path / "dist" / "bundle.min.js").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        assert not findings
+
+    def test_lockfile_in_node_modules_not_flagged(self, tmp_path):
+        nm = tmp_path / "node_modules" / "pkg"
+        nm.mkdir(parents=True)
+        (nm / "package-lock.json").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        assert not findings
+
+    def test_message_states_size_not_evidence_basis(self, tmp_path):
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        msg = findings[0]["message"]
+        assert "~" in msg                       # token figure is approximate
+        assert "based on" in msg.lower() and "size" in msg.lower()
+
+    def test_gitignored_lockfile_skipped(self, tmp_path):
+        import subprocess
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True,
+                       stdin=subprocess.DEVNULL)
+        (tmp_path / ".gitignore").write_text("pnpm-lock.yaml\n")
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 2000)
+        findings = _check_large_read_sinks(str(tmp_path), {}, self.CFG)
+        assert not findings
+
+
+class TestWarnOnlyNotStaged:
+    """The load-bearing guard: large read sinks must NEVER be auto-staged by --fix."""
+
+    def test_stage_fixes_does_not_emit_large_read_sinks(self, tmp_path):
+        (tmp_path / "pnpm-lock.yaml").write_text("x" * 60000)
+        report = stage_fixes(str(tmp_path), {"denyReadsMinBytes": 1000})
+        assert not any("pnpm-lock.yaml" in str(f.get("value", "")) for f in report["fixes"])
 
 
 class TestWorktreeSparse:

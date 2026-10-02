@@ -518,6 +518,87 @@ def _check_deny_reads(cwd: str | None, settings: dict) -> list[dict]:
     return findings
 
 
+_LOCKFILE_NAMES = {
+    "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "npm-shrinkwrap.json",
+    "Cargo.lock", "poetry.lock", "Pipfile.lock", "composer.lock",
+    "Gemfile.lock", "go.sum",
+}
+_BUNDLE_SUFFIXES = (".min.js", ".min.css")
+
+
+def _git_ignored(path: Path, cwd: str) -> bool:
+    """True if `git check-ignore` reports path as ignored. Fail-open (not a git repo,
+    git missing, any error) -> False, so non-git trees behave normally. A gitignored
+    lockfile is a local/generated artifact, not worth a committed deny rule."""
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(path)],
+            cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _check_large_read_sinks(cwd: str | None, settings: dict, config: dict) -> list[dict]:
+    """denyReads (WARN-ONLY): flag large lockfiles + bundle/minified assets that have
+    no deny rule, with a suggested rule. Deliberately NOT wired into stage_fixes, so
+    --fix never auto-applies these (unlike dist/build/vendor). The suggestion is based
+    on file SIZE, not on evidence the file is ever read — that evidence needs
+    transcripts, which this check does not have."""
+    if not cwd:
+        return []
+    from ccgate.config import DEFAULTS as _DEFAULTS
+    project = Path(cwd)
+    threshold = config.get("denyReadsMinBytes", _DEFAULTS["denyReadsMinBytes"])
+    deny_rules: list[str] = settings.get("permissions", {}).get("deny", [])
+    # Prune heavy/already-handled subtrees from traversal (not just from matches) so a
+    # multi-GB node_modules is never walked. dist/build/vendor are auto-denied elsewhere.
+    prune = {"node_modules", ".git", *_SENSITIVE_DIRS}
+    findings: list[dict] = []
+
+    for dirpath, dirnames, filenames in os.walk(project):
+        dirnames[:] = [d for d in dirnames if d not in prune]
+        for name in filenames:
+            is_lock = name in _LOCKFILE_NAMES
+            is_bundle = name.endswith(_BUNDLE_SUFFIXES)
+            if not (is_lock or is_bundle):
+                continue
+            p = Path(dirpath) / name
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if size < threshold:
+                continue
+            suggested = (
+                f"Read(**/{name})" if is_lock
+                else ("Read(**/*.min.js)" if name.endswith(".min.js") else "Read(**/*.min.css)")
+            )
+            rel = str(p.relative_to(project)).replace("\\", "/")
+            # Covered iff the suggested glob rule, or an exact per-file rule, is present.
+            # A bare substring match would let one file's rule mask every other match.
+            if any(r.strip() in (suggested, f"Read({rel})") for r in deny_rules):
+                continue
+            if _git_ignored(p, cwd):
+                continue
+            # I4: approximate token estimate = bytes / 4 chars-per-token. A lockfile is
+            # mostly short tokens and punctuation, so bytes/4 UNDERSTATES the real cost.
+            approx_tokens = size // _CHARS_PER_TOKEN
+            size_str = f"{size // 1024} KB" if size >= 1024 else f"{size} B"
+            findings.append({
+                "check": "denyReads",
+                "severity": "warning",
+                "message": (
+                    f"{rel} is {size_str} (~{approx_tokens:,} tokens, approx) and "
+                    f"rarely useful to read whole. Consider adding {suggested} to "
+                    "permissions.deny — not auto-applied; add it yourself if you want. "
+                    "(Suggestion is based on file size, not evidence the file is read.)"
+                ),
+            })
+    return findings
+
+
 def _check_worktree_sparse(cwd: str | None, settings: dict) -> list[dict]:
     """worktreeSparse: git worktree in a monorepo without worktree.sparsePaths."""
     if not cwd:
@@ -959,6 +1040,7 @@ def run_shape(cwd: str | None = None, config: dict | None = None) -> list[dict]:
     settings = _load_settings(cwd)
     findings.extend(_check_cache_ttl(settings))
     findings.extend(_check_deny_reads(cwd, settings))
+    findings.extend(_check_large_read_sinks(cwd, settings, config))
     findings.extend(_check_worktree_sparse(cwd, settings))
     findings.extend(_check_output_caps(cwd))
     findings.extend(_check_session_pinning(settings))
