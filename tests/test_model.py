@@ -1,4 +1,4 @@
-from ccgate.model import get_model_spec, resolve_ttl, ModelSpec
+from ccgate.model import ModelSpec, get_model_spec, resolve_ttl
 
 
 def test_known_model_returns_spec():

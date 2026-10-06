@@ -3,13 +3,10 @@ import os
 import socket
 import subprocess
 import sys
-import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
-
-import pytest
 
 WORKTREE = Path(__file__).parent.parent
 FIXTURE = WORKTREE / "tests" / "fixtures" / "otlp_export.json"

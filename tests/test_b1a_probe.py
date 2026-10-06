@@ -1,8 +1,9 @@
 import json
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from b1a_ci_probe import evaluate, _parse_bash_denies, _contextignore_for  # noqa: E402
+from b1a_ci_probe import _contextignore_for, _parse_bash_denies, evaluate  # noqa: E402
 
 MARK = "SENTINEL_B1A_READ_OK"
 

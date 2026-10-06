@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ccgate.report import assert_bounds, compute_ledger, render_report, _D4_CHECKS
+from ccgate.report import _D4_CHECKS, assert_bounds, compute_ledger, render_report
 from ccgate.scripts import miss_audit
 
 _FIX = Path(__file__).parent / "fixtures" / "track_a_report"

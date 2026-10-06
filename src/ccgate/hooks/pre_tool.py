@@ -5,13 +5,11 @@ import fnmatch
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from ccgate.config import load_config
 from ccgate.state import acquire_lock, ccgate_home
-
 
 # ── read-cache helpers (used by Task 3) ───────────────────────────────────────
 
@@ -59,7 +57,7 @@ def _load_contextignore_patterns() -> list[str]:
 
 def _check_contextignore(
     tool_name: str, tool_input: dict, config: dict
-) -> Optional[dict]:
+) -> dict | None:
     if not config.get("contextignoreEnabled", False):
         return None
     if tool_name not in ("Read", "Edit", "Write"):
@@ -99,7 +97,7 @@ def _window_size(session_id: str) -> int:
 def _is_stale(entry: dict, file_log: list, config: dict, session_id: str) -> bool:
     try:
         ts = datetime.fromisoformat(entry["ts"].replace("Z", "+00:00"))
-        elapsed_ms = (datetime.now(timezone.utc) - ts).total_seconds() * 1000
+        elapsed_ms = (datetime.now(UTC) - ts).total_seconds() * 1000
     except (KeyError, ValueError):
         return True  # unparseable ts → treat as stale
     if elapsed_ms > config.get("staleTimeMs", 600_000):
@@ -114,7 +112,7 @@ def _is_stale(entry: dict, file_log: list, config: dict, session_id: str) -> boo
 
 def _check_read_cache(
     session_id: str, tool_name: str, tool_input: dict, config: dict
-) -> Optional[dict]:
+) -> dict | None:
     if not config.get("readCacheEnabled", False):
         return None
     if tool_name != "Read":
@@ -140,7 +138,7 @@ def _check_read_cache(
             idx = len(file_log)
             reads[key] = {
                 "mtime": current_mtime,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "idx": idx,
             }
             file_log.append(file_path)
@@ -154,7 +152,7 @@ def _check_read_cache(
             idx = len(file_log)
             reads[key] = {
                 "mtime": current_mtime,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "idx": idx,
             }
             file_log.append(file_path)
@@ -166,7 +164,7 @@ def _check_read_cache(
             idx = len(file_log)
             reads[key] = {
                 "mtime": current_mtime,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "idx": idx,
             }
             file_log.append(file_path)
@@ -188,7 +186,7 @@ def _check_read_cache(
 
 # (prefix, class_a_flag, class_b_filter, use_pipefail)
 # class_a_flag=None → Class B only; use_pipefail=True → prepend "set -o pipefail; "
-_BUILTIN_RULES: list[tuple[str, Optional[str], str, bool]] = [
+_BUILTIN_RULES: list[tuple[str, str | None, str, bool]] = [
     ("pytest",      "-q",        "2>&1 | tail -n 40", True),
     ("cargo test",  "--quiet",   "2>&1 | tail -n 40", True),
     ("jest",        "--silent",  "2>&1 | tail -n 40", True),
@@ -219,7 +217,7 @@ def _has_compound(command: str) -> bool:
 
 def _apply_bash_rewrite(
     tool_name: str, tool_input: dict, config: dict
-) -> Optional[dict]:
+) -> dict | None:
     if not config.get("bashRewriteEnabled", False):
         return None
     if tool_name != "Bash":
@@ -230,7 +228,7 @@ def _apply_bash_rewrite(
     if _has_compound(command):
         return None
 
-    user_rules: list[tuple[str, Optional[str], str, bool]] = []
+    user_rules: list[tuple[str, str | None, str, bool]] = []
     for rule in config.get("bashRewriteRules", []):
         prefix = rule.get("prefix", "")
         if any(c in prefix for c in _METACHARACTERS):
@@ -271,7 +269,7 @@ def main() -> None:
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {})
 
-    result: Optional[dict] = None
+    result: dict | None = None
     try:
         config = load_config(cwd=str(Path.cwd()))
         result = _check_contextignore(tool_name, tool_input, config)

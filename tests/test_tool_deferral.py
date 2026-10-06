@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from ccgate.scripts.shape import (
     _check_tool_deferral,
     _is_first_party_base_url,
     _load_mcp_configs,
-    stage_fixes,
     apply_fixes,
+    stage_fixes,
 )
 
 

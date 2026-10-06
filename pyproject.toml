@@ -18,5 +18,34 @@ pythonpath = ["src"]
 where = ["src"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "jsonschema>=4"]
+dev = ["pytest>=8", "jsonschema>=4", "ruff>=0.6", "mypy>=1.11", "bandit>=1.7"]
 run = ["claude-agent-sdk>=0.2.128"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# Curated: real-bug + modernization rules. Deliberately NOT selecting the
+# opinionated rule groups (PL/BLE/S/SIM/RUF) that fight this codebase's
+# intentional fail-open style (bare except / subprocess-without-check / try-pass).
+select = ["E", "F", "I", "UP"]
+# E501 (line length) is pure style/churn here — the formatter owns wrapping, not the gate.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately import after sys.path manipulation (E402) and use short
+# throwaway names like `l` in lambdas/comprehensions (E741). Not worth nitpicking.
+"tests/**" = ["E402", "E741"]
+
+[tool.mypy]
+python_version = "3.11"
+# jsonschema and claude_agent_sdk ship no type stubs; don't fail on their imports.
+ignore_missing_imports = true
+files = ["src/ccgate"]
+
+[tool.bandit]
+# B603/B607: subprocess calls with partial paths — this project shells out to
+# git/gitleaks/claude/pytest by design; those are intentional, not findings.
+skips = ["B603", "B607"]

@@ -1,15 +1,16 @@
 import json
 import os
 import time
-import pytest
 from pathlib import Path
+
+import pytest
+
 from ccgate.state import (
     acquire_lock,
     ccgate_home,
     read_session,
     read_tools,
     session_path,
-    tools_path,
     write_session,
     write_tools,
 )

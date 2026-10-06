@@ -7,7 +7,7 @@ from unittest.mock import patch
 import jsonschema
 import pytest
 
-from ccgate.scripts.shape import stage_fixes, apply_fixes
+from ccgate.scripts.shape import apply_fixes, stage_fixes
 
 
 class TestStageFixes:

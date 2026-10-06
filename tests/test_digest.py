@@ -229,7 +229,6 @@ def test_import_atomic(tmp_path, monkeypatch):
 
     # Patch os.replace inside digest module to raise before commit
     import ccgate.scripts.digest as digest_mod
-    original_replace = os.replace
 
     def failing_replace(src, dst):
         raise OSError("simulated disk full")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ccgate.config import load_config
 from ccgate.state import acquire_lock, ccgate_home, read_session, write_session
@@ -69,7 +69,7 @@ def _charge_ledger(session_id: str, notice_bytes: int) -> None:
                 "response_chars": 0,
                 "tokens_est": 0,
                 "notice_bytes": notice_bytes,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
             })
             session["tool_calls"] = calls
             write_session(session_id, session)

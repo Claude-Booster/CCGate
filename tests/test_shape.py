@@ -1,17 +1,18 @@
 import tempfile
 from pathlib import Path
 
-from ccgate.config import DEFAULTS
 from ccgate.scripts.shape import (
-    _check_claudemd_lines, _check_skill_listing,
-    _check_skill_side_effects, _check_claudemd_excludes,
-    run_shape,
+    _check_cache_ttl,
+    _check_claudemd_excludes,
+    _check_claudemd_lines,
+    _check_deny_reads,
+    _check_large_read_sinks,
+    _check_output_caps,
+    _check_skill_listing,
+    _check_skill_side_effects,
+    _check_worktree_sparse,
+    stage_fixes,
 )
-from ccgate.scripts.shape import (
-    _check_cache_ttl, _check_deny_reads, _check_worktree_sparse,
-    _check_output_caps, _load_settings,
-)
-from ccgate.scripts.shape import _check_large_read_sinks, stage_fixes
 
 
 class TestClaudemdLines:
@@ -322,7 +323,6 @@ class TestWorktreeSparse:
 class TestOutputCaps:
     def test_always_returns_empty_in_phase0(self, tmp_path):
         # Phase 0 stub — no session history available
-        from ccgate.scripts.shape import _check_output_caps
         assert _check_output_caps(str(tmp_path)) == []
 
 

@@ -20,8 +20,8 @@ def _build_options(patterns, enforce: bool, config: dict, recorder, max_turns=No
     B0 grants only Read. When bashEnabled (spec §4), Bash is granted and BOTH the F1 Bash-read
     deny (PreToolUse) and F3 truncation (PostToolUse) register — each self-gates on its prefix
     list. `tools` is kept minimal: under the model, only listed tools are available."""
-    from ccgate.run.policy import make_read_deny_hook, make_bash_read_deny_hook
     from ccgate.run.bashcap import BashCapHook
+    from ccgate.run.policy import make_bash_read_deny_hook, make_read_deny_hook
     from ccgate.run.shellcmd import compile_prefixes
     # Tool AVAILABILITY is independent of enforce: --no-enforce is the measurement baseline and
     # must offer the SAME tools as the enforced run (so it exercises the same task) — only the
@@ -52,7 +52,7 @@ def _factory(options):
     """Real-SDK client factory: translate the raw-callback dict → ClaudeAgentOptions/HookMatcher.
     One HookMatcher per (matcher, callback); multiple matchers on one event are supported and
     run concurrently in the CLI (spec §2). All SDK imports are confined here."""
-    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
+    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, HookMatcher
     hooks = {}
     pre = [HookMatcher(matcher=m, hooks=[cb]) for m, cb in options["hooks"]["PreToolUse"]]
     post = [HookMatcher(matcher=m, hooks=[cb]) for m, cb in options["hooks"]["PostToolUse"]]

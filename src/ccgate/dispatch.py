@@ -12,24 +12,24 @@ def main(argv: list[str] | None = None) -> None:
     subcmd = args[0]
 
     if subcmd in ("statusline", "status"):
-        from ccgate.scripts.statusline import main as _main
-        _main()
+        from ccgate.scripts.statusline import main as _statusline_main
+        _statusline_main()
 
     elif subcmd in ("audit", "miss-audit"):
-        from ccgate.scripts.miss_audit import main as _main
-        _main(args[1:])
+        from ccgate.scripts.miss_audit import main as _audit_main
+        _audit_main(args[1:])
 
     elif subcmd in ("shape", "lint"):
-        from ccgate.scripts.shape import main as _main
-        _main(args[1:])
+        from ccgate.scripts.shape import main as _shape_main
+        _shape_main(args[1:])
 
     elif subcmd == "run":
         try:
-            from ccgate.run.cli import main as _main
+            from ccgate.run.cli import main as _run_main
         except ImportError:
             print("ccgate run requires the 'run' extra: pip install -e '.[run]'", file=sys.stderr)
             sys.exit(1)
-        _main(args[1:])
+        _run_main(args[1:])
 
     elif subcmd in ("--help", "-h", "help"):
         _usage()

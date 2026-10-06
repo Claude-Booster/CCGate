@@ -1,4 +1,4 @@
-from ccgate.config import load_config, DEFAULTS
+from ccgate.config import DEFAULTS, load_config
 
 
 def test_bashcap_defaults_present():

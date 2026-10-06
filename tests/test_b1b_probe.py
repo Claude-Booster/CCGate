@@ -1,8 +1,9 @@
 import json
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from b1b_ci_probe import evaluate, _parse_truncations  # noqa: E402
+from b1b_ci_probe import _parse_truncations, evaluate  # noqa: E402
 
 
 def test_green_when_baseline_zero_and_treatment_truncated():

@@ -3,8 +3,13 @@ import tempfile
 from pathlib import Path
 
 from ccgate.transcript import (
-    CapabilityBand, detect_band, encode_cwd,
-    grand_total_input, infer_ttl_from_usage, read_transcript, Usage,
+    CapabilityBand,
+    Usage,
+    detect_band,
+    encode_cwd,
+    grand_total_input,
+    infer_ttl_from_usage,
+    read_transcript,
 )
 
 

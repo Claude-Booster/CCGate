@@ -1,4 +1,3 @@
-import pytest
 from ccgate.ledger import assert_gate, compute_net, format_headline
 
 _NO_NOTICES = {

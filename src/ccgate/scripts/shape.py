@@ -1,7 +1,7 @@
 """shape.py — static config lint (Phase 0). Checks: G2 (claudeMdLines), G3 (skillListing)."""
+import datetime
 import json
 import os
-import datetime
 import re
 import shutil
 import subprocess
@@ -880,7 +880,7 @@ def stage_fixes(
         _version = "0.1.0"
 
     return {
-        "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "cwd": cwd_str,
         "ccgate_version": _version,
         "fixes": fixes,
@@ -935,7 +935,7 @@ def apply_fixes(report: dict) -> dict:
     return {
         **report,
         "applied": True,
-        "applied_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "applied_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "startup_chars_before": chars_before,
         "startup_chars_after": chars_after,
         "startup_tokens_before_approx": tokens_before,
@@ -1061,6 +1061,7 @@ def _find_latest_fix_report(reports_dir: Path) -> Path | None:
 
 def main(argv: list[str] | None = None) -> None:
     import argparse
+
     from ccgate.config import load_config
 
     parser = argparse.ArgumentParser(prog="ccgate shape")
@@ -1086,7 +1087,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.fix:
             report = stage_fixes(args.cwd, config, fix_skills=args.fix_skills)
             reports_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+            ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S")
             report_path = reports_dir / f"fix-{ts}.json"
             report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
             if not report["fixes"] and not report["skipped"]:
@@ -1111,6 +1112,7 @@ def main(argv: list[str] | None = None) -> None:
                     sys.exit(1)
                 report = json.loads(report_path.read_text(encoding="utf-8"))
             updated = apply_fixes(report)
+            assert report_path is not None  # set by --fix above, or in the report-is-None branch
             report_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             delta = updated.get("startup_delta_approx") or 0
             print(f"Fixes applied. Startup overhead reduced by ~{delta:,} tokens (estimated).")

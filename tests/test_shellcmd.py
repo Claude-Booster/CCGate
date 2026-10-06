@@ -1,6 +1,10 @@
 import pytest
+
 from ccgate.run.shellcmd import (
-    compile_prefixes, command_matches, first_token, strip_runner_prefixes,
+    command_matches,
+    compile_prefixes,
+    first_token,
+    strip_runner_prefixes,
 )
 
 

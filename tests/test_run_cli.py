@@ -64,8 +64,8 @@ def test_b0_restricts_tools_to_read():
     """B0 grants only Read: `tools` (availability) AND allowed_tools (auto-approve) both ["Read"].
     allowed_tools alone leaves Bash/Grep available-but-unapproved, so the model reaches for them
     and is blocked before using Read; and it would leave a non-Read bypass of the deny (review #3)."""
-    from ccgate.run.cli import _build_options
     from ccgate.config import load_config
+    from ccgate.run.cli import _build_options
     opts = _build_options([], enforce=True, config=load_config(), recorder=None)
     assert opts["tools"] == ["Read"]
     assert opts["allowed_tools"] == ["Read"]
@@ -73,16 +73,16 @@ def test_b0_restricts_tools_to_read():
 
 def test_max_turns_in_options_when_set(tmp_path, monkeypatch):
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    from ccgate.run.cli import _build_options
     from ccgate.config import load_config
+    from ccgate.run.cli import _build_options
     opts = _build_options([], enforce=True, config=load_config(), recorder=None, max_turns=40)
     assert opts["max_turns"] == 40
 
 
 def test_max_turns_defaults_none(tmp_path, monkeypatch):
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    from ccgate.run.cli import _build_options
     from ccgate.config import load_config
+    from ccgate.run.cli import _build_options
     opts = _build_options([], enforce=True, config=load_config(), recorder=None)
     assert opts["max_turns"] is None      # omitted -> no cap
 
@@ -92,8 +92,8 @@ def test_no_enforce_still_grants_read_for_baseline(tmp_path, monkeypatch):
     # still be granted. Regression guard — the Task 7 rework gated the Read grant on enforce,
     # leaving --no-enforce with empty tools (B0 red state PROBE_RED_READ_HAPPENED=False).
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
-    from ccgate.run.cli import _build_options
     from ccgate.config import load_config
+    from ccgate.run.cli import _build_options
     opts = _build_options([], enforce=False, config=load_config(), recorder=None)
     assert opts["tools"] == ["Read"]
     assert opts["allowed_tools"] == ["Read"]
@@ -137,6 +137,7 @@ def test_bashcap_enabled_adds_bash_and_posttool_hook(tmp_path, monkeypatch):
 def test_missing_sdk_gives_clean_error(tmp_path, monkeypatch, capsys):
     """Without the 'run' extra, `ccgate run` exits cleanly, not with a traceback (review #2)."""
     import importlib.util as iu
+
     from ccgate.run import cli
     task = tmp_path / "t.txt"
     task.write_text("do it", encoding="utf-8")
@@ -171,8 +172,8 @@ def test_factory_builds_two_pretooluse_matchers():
     """The translation seam (raw dict -> ClaudeAgentOptions/HookMatcher) must not drift from the
     SDK signatures — including two PreToolUse matchers (Read+Bash), the B0-untested shape.
     Constructing options needs no auth/network — catch drift here, not in CI."""
-    from ccgate.run.cli import _build_options, _factory
     from ccgate.config import load_config
+    from ccgate.run.cli import _build_options, _factory
     cfg = load_config()
     cfg["bashEnabled"] = True
     # bashEnabled -> two raw PreToolUse callbacks -> two HookMatchers; must construct without raising:

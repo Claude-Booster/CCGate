@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from ccgate.scripts.shape import (
     _check_session_pinning,
     _get_cc_version,
     _is_subscription_auth,
-    stage_fixes,
     apply_fixes,
+    stage_fixes,
 )
 
 
@@ -236,7 +233,6 @@ class TestStagePinEnv:
 
     def test_apply_falls_back_on_permission_error(self, tmp_path):
         """Windows WinError 5: os.replace() failure falls back to direct write."""
-        import os
         from ccgate.scripts.shape import _safe_json_patch
 
         settings_file = tmp_path / "settings.json"

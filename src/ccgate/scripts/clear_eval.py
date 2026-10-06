@@ -74,14 +74,14 @@ def _run_eval(transcript_path: str, json_out: bool) -> tuple[int, str]:
 
     baseline_resp_obj = client.beta.messages.count_tokens(
         model=last_model,
-        messages=messages,
+        messages=messages,  # type: ignore[arg-type]  # SDK accepts plain dicts at runtime
     )
     original_before: int = baseline_resp_obj.input_tokens
 
     cleared_resp = client.beta.messages.count_tokens(
         model=last_model,
-        messages=messages,
-        context_management={"type": "clear_tool_uses_20250919"},
+        messages=messages,  # type: ignore[arg-type]  # SDK accepts plain dicts at runtime
+        context_management={"type": "clear_tool_uses_20250919"},  # type: ignore[arg-type]
     )
     cleared_tokens: int = cleared_resp.input_tokens
 

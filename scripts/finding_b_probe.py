@@ -16,7 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ccgate.measure import (  # noqa: E402
-    extract_run_metrics, tokens_injected_present, ceiling_test_added, classify_completion,
+    ceiling_test_added,
+    classify_completion,
+    extract_run_metrics,
+    tokens_injected_present,
 )
 
 REPO = Path(__file__).resolve().parent.parent

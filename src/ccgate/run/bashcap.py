@@ -8,7 +8,7 @@ import hashlib
 
 # Prefix helpers relocated to run/shellcmd.py (shared, so it cannot depend on this feature
 # module). Re-imported here so existing callers/tests keep working unchanged.
-from ccgate.run.shellcmd import compile_prefixes, command_matches  # noqa: F401
+from ccgate.run.shellcmd import command_matches, compile_prefixes  # noqa: F401
 
 
 def build_marker(elided: int, head: int, tail: int) -> str:

@@ -1,6 +1,7 @@
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import UTC
 from enum import Enum
 from pathlib import Path
 
@@ -165,8 +166,7 @@ def find_transcripts(
     if since_dt is None:
         return paths
 
-    from datetime import timezone
-    cutoff = since_dt if since_dt.tzinfo else since_dt.replace(tzinfo=timezone.utc)
+    cutoff = since_dt if since_dt.tzinfo else since_dt.replace(tzinfo=UTC)
     filtered: list[Path] = []
     for p in paths:
         ts = _first_transcript_timestamp(p)

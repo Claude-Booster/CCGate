@@ -7,7 +7,9 @@ snapshots are not available until Phase 1 hooks ship.
 import json
 import sys
 from collections import defaultdict
+from datetime import UTC
 from pathlib import Path
+from typing import Any
 
 from ccgate import taxonomy
 from ccgate.transcript import (
@@ -119,7 +121,7 @@ def run_audit(paths: list[Path], config: dict) -> dict:
     denom = tokens["cache_read"] + tokens["cache_creation"]
     cache_read_rate = (tokens["cache_read"] / denom) if denom > 0 else 0.0
 
-    misses_list = []
+    misses_list: list[dict[str, Any]] = []
     for cause in sorted(cause_counts.keys()):
         misses_list.append({
             "cause":           cause,
@@ -168,6 +170,7 @@ def _render_table(report: dict) -> str:
 
 def main(argv: list[str] | None = None) -> None:
     import argparse
+
     from ccgate.config import load_config
 
     parser = argparse.ArgumentParser(prog="ccgate audit")
@@ -186,13 +189,13 @@ def main(argv: list[str] | None = None) -> None:
 
     since_dt = None
     if args.since and not paths:
-        from datetime import datetime, timedelta, timezone
         import re as _re
+        from datetime import datetime, timedelta
         m = _re.fullmatch(r"(\d+(?:\.\d+)?)\s*([smhd])", args.since.strip())
         if m:
             value, unit = float(m.group(1)), m.group(2)
             seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit] * value
-            since_dt = datetime.now(tz=timezone.utc) - timedelta(seconds=seconds)
+            since_dt = datetime.now(tz=UTC) - timedelta(seconds=seconds)
         else:
             print(f"ccgate audit: unrecognised --since value {args.since!r} (use e.g. 1d, 6h)", file=sys.stderr)
             sys.exit(1)

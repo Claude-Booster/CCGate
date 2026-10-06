@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +11,6 @@ SRC = str(Path(__file__).parent.parent / "src")
 
 
 def run_hook(payload: dict, env: dict) -> "subprocess.CompletedProcess":
-    import subprocess
     e = env.copy()
     e.setdefault("PYTHONPATH", SRC)
     return subprocess.run(

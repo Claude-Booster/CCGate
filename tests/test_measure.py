@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+
 from ccgate.measure import extract_run_metrics
 
 
@@ -40,7 +40,7 @@ def test_extract_incomplete_record_has_no_marker(tmp_path):
     assert extract_run_metrics(p)["complete_marker"] is False
 
 
-from ccgate.measure import derive_n, decide
+from ccgate.measure import decide, derive_n
 
 
 def test_derive_n_boundaries():

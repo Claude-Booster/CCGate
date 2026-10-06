@@ -1,5 +1,6 @@
 from ccgate import taxonomy
 
+
 def test_d1_codes_are_strings():
     assert taxonomy.D1_MODEL_SWITCH == "D1.model_switch"
     assert taxonomy.D1_EFFORT_CHANGE == "D1.effort_change"

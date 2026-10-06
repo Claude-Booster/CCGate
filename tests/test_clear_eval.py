@@ -1,11 +1,7 @@
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 WORKTREE = Path(__file__).parent.parent
 sys.path.insert(0, str(WORKTREE / "src"))
@@ -62,6 +58,7 @@ def test_savings_computed_correctly(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         rc, out = mod._run_eval(str(transcript), json_out=False)
@@ -79,6 +76,7 @@ def test_json_output_fields(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         rc, out = mod._run_eval(str(transcript), json_out=True)
@@ -100,6 +98,7 @@ def test_missing_api_key_exits_1(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         rc, out = mod._run_eval(str(transcript), json_out=False)
@@ -115,6 +114,7 @@ def test_missing_anthropic_package(tmp_path, monkeypatch):
     # Simulate ImportError by removing anthropic from sys.modules and blocking it
     with patch.dict(sys.modules, {"anthropic": None}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         rc, out = mod._run_eval(str(transcript), json_out=False)
@@ -132,6 +132,7 @@ def test_zero_savings_reported(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         rc, out = mod._run_eval(str(transcript), json_out=True)
@@ -183,6 +184,7 @@ def test_model_id_from_last_turn(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         mod._run_eval(str(transcript), json_out=False)
@@ -222,6 +224,7 @@ def test_tool_use_content_preserved_in_messages(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"anthropic": fake_anthro}):
         import importlib
+
         import ccgate.scripts.clear_eval as mod
         importlib.reload(mod)
         mod._run_eval(str(transcript), json_out=False)

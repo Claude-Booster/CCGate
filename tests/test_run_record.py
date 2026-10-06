@@ -1,8 +1,8 @@
 import json
-from pathlib import Path
-from ccgate.run.record import make_run_id, assistant_entry, runs_dir, RunRecorder, is_complete
+
+from ccgate.run.record import RunRecorder, assistant_entry, is_complete, make_run_id, runs_dir
 from ccgate.scripts.miss_audit import run_audit
-from ccgate.transcript import encode_cwd, _parse_usage
+from ccgate.transcript import _parse_usage, encode_cwd
 
 
 def test_append_then_finish_writes_marker(tmp_path, monkeypatch):

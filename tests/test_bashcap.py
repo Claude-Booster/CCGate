@@ -1,8 +1,14 @@
 import asyncio
+
 import pytest
+
 from ccgate.run.bashcap import (
-    build_marker, compile_prefixes, command_matches, truncate,
-    extract_stdout, repack, BashCapHook,
+    BashCapHook,
+    command_matches,
+    compile_prefixes,
+    extract_stdout,
+    repack,
+    truncate,
 )
 from ccgate.run.record import RunRecorder
 

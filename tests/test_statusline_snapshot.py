@@ -1,7 +1,6 @@
 """Tests for statusline._persist_snapshot."""
 import json
-import pytest
-from pathlib import Path
+
 from ccgate.scripts.statusline import _persist_snapshot
 
 

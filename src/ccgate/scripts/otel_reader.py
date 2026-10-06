@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -82,7 +82,7 @@ def _write_session_file(parsed: dict, source: str, home: Path | None = None) -> 
     out_path = sessions_dir / f"{safe_id}-otel.json"
     data = {
         "session_id": parsed["session_id"],
-        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "collected_at": datetime.now(UTC).isoformat(),
         "source": source,
         "tokens": parsed["tokens"],
     }
@@ -157,8 +157,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
     port = args.port if args.port is not None else cfg["otelPort"]
     handler = _make_handler()
-    server = HTTPServer(("0.0.0.0", port), handler)
-    print(f"otel_reader: listening on :{port} for POST /v1/metrics")
+    # Local-only receiver: OTLP metrics come from the Claude Code session on this
+    # machine. Bind to loopback, not all interfaces, to avoid exposing the port.
+    server = HTTPServer(("127.0.0.1", port), handler)
+    print(f"otel_reader: listening on 127.0.0.1:{port} for POST /v1/metrics")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

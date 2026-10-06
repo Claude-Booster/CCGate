@@ -96,3 +96,63 @@ jobs:
         with:
           path: ./
           extra_args: --only-verified
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: ruff (lint)
+        run: ruff check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: mypy (typecheck)
+        run: mypy
+
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: bandit (SAST, medium+)
+        run: bandit -r src scripts -ll -c pyproject.toml
+
+  test:
+    # windows-latest matches where the suite is validated (the dev machine); some
+    # tests are Windows-path / subprocess specific.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,run]"
+      - name: pytest (full suite)
+        run: pytest -q
+
+  audit:
+    # Dependency CVE scan. Non-blocking: CCGate's own deps are tiny; advisories are
+    # usually transitive/informational. Surfaces them without failing the build.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[run]" pip-audit
+      - name: pip-audit (dependency CVEs)
+        run: pip-audit

@@ -1,9 +1,13 @@
 import asyncio
 import json
 from pathlib import Path
+
 from ccgate.run.policy import (
-    load_contextignore, path_is_ignored, make_read_deny_hook, make_bash_read_deny_hook,
     first_matching_pattern,
+    load_contextignore,
+    make_bash_read_deny_hook,
+    make_read_deny_hook,
+    path_is_ignored,
 )
 from ccgate.run.record import RunRecorder
 

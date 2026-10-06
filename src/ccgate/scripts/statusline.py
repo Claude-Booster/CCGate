@@ -6,6 +6,7 @@ writes a single ≤ COLUMNS line to stdout.
 import json
 import os
 import sys
+from typing import Any
 
 _SHORT_NAMES: dict[str, str] = {
     "claude-opus-5":             "Opus 5",
@@ -39,7 +40,7 @@ def _context_bar(used_pct: float) -> str:
 
 def _safe(payload: dict, *keys, default=None):
     """Navigate nested dict keys; return default on missing/None at any level."""
-    v = payload
+    v: Any = payload
     for k in keys:
         if not isinstance(v, dict):
             return default
@@ -111,7 +112,7 @@ def render(payload: dict, config: dict) -> str:
         if isinstance(miss_causes, dict) and miss_causes:
             top = sorted(miss_causes.items(), key=lambda kv: -kv[1])[:2]
             suffix = " (" + ", ".join(f"{c} ×{n}" for c, n in top) + ")"
-        escalation = f"  cache {hit_ratio*100:.0f}% ↓{suffix}"
+        escalation = f"  cache {(hit_ratio or 0.0)*100:.0f}% ↓{suffix}"
 
     line = base + escalation
     return line[:cols]

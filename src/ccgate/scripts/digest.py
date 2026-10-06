@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ccgate.config import load_config
@@ -74,7 +74,7 @@ def _do_export(out_path_str: str | None, cwd_str: str | None, home: Path | None 
 
     digest = {
         "digest_id": str(uuid.uuid4()),
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "ccgate_version": ccgate_version,
         "sessions_analyzed": sessions_analyzed,
         "path_stats": [
@@ -125,7 +125,7 @@ def _do_import(digest_path_str: str, home_str: str | None = None) -> None:
 
     imports_meta = patterns.setdefault("_imports", [])
     imports_meta.append({
-        "imported_at": datetime.now(timezone.utc).isoformat(),
+        "imported_at": datetime.now(UTC).isoformat(),
         "digest_id": raw.get("digest_id"),
         "paths_merged": imported,
     })

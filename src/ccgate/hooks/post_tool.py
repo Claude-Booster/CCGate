@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ccgate.config import load_config
 from ccgate.state import acquire_lock, ccgate_home, read_session, write_session
@@ -13,7 +13,7 @@ from ccgate.state import acquire_lock, ccgate_home, read_session, write_session
 def _default_session(session_id: str) -> dict:
     return {
         "session_id": session_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "model": None,
         "tool_calls": [],
         "tool_profile": {},
@@ -56,7 +56,7 @@ def main() -> None:
 
         response_chars = len(tool_response)
         tokens_est = response_chars // 4
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
 
         with acquire_lock(session_id):
             session = read_session(session_id) or _default_session(session_id)

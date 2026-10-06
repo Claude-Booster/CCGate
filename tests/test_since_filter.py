@@ -4,13 +4,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from ccgate.transcript import find_transcripts, _first_transcript_timestamp
+from ccgate.transcript import _first_transcript_timestamp, find_transcripts
 
 
 def _write_transcript(path: Path, timestamp: str) -> None:
@@ -51,7 +49,7 @@ class TestFirstTranscriptTimestamp:
 class TestFindTranscriptsSinceFilter:
     def _setup_sessions(self, base: Path) -> tuple[Path, Path, Path]:
         """Create three sessions: old (3 days ago), recent (6 hours ago), no-timestamp."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         old_ts = (now - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
         recent_ts = (now - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -78,7 +76,7 @@ class TestFindTranscriptsSinceFilter:
 
     def test_since_1d_excludes_old_session(self, tmp_path):
         old, recent, no_ts = self._setup_sessions(tmp_path)
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=1)
+        cutoff = datetime.now(tz=UTC) - timedelta(days=1)
         with patch("ccgate.transcript.Path.home", return_value=tmp_path):
             paths = find_transcripts(since_dt=cutoff)
         assert old not in paths
@@ -87,7 +85,7 @@ class TestFindTranscriptsSinceFilter:
     def test_since_1d_includes_no_timestamp_fail_open(self, tmp_path):
         """Files with no parseable timestamp are included (fail-open)."""
         old, recent, no_ts = self._setup_sessions(tmp_path)
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=1)
+        cutoff = datetime.now(tz=UTC) - timedelta(days=1)
         with patch("ccgate.transcript.Path.home", return_value=tmp_path):
             paths = find_transcripts(since_dt=cutoff)
         assert no_ts in paths
@@ -98,7 +96,7 @@ class TestFindTranscriptsSinceFilter:
         No-timestamp files are still included (fail-open), so result is not empty.
         """
         old, recent, no_ts = self._setup_sessions(tmp_path)
-        cutoff = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+        cutoff = datetime.now(tz=UTC) + timedelta(hours=1)
         with patch("ccgate.transcript.Path.home", return_value=tmp_path):
             paths = find_transcripts(since_dt=cutoff)
         assert old not in paths
@@ -111,13 +109,14 @@ class TestFindTranscriptsSinceFilter:
         Sets mtime of the old session to 'now' (simulating OneDrive sync),
         which must NOT cause it to appear in the --since 1d results.
         """
-        import os, time
+        import os
+        import time
         old, recent, no_ts = self._setup_sessions(tmp_path)
         # Touch old session's mtime to now — sync tool behaviour
         now_ts = time.time()
         os.utime(old, (now_ts, now_ts))
 
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=1)
+        cutoff = datetime.now(tz=UTC) - timedelta(days=1)
         with patch("ccgate.transcript.Path.home", return_value=tmp_path):
             paths = find_transcripts(since_dt=cutoff)
         assert old not in paths  # content timestamp still 3 days ago

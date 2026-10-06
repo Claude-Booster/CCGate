@@ -1,6 +1,4 @@
-import os
-import pytest
-from ccgate.config import load_config, DEFAULTS
+from ccgate.config import DEFAULTS, load_config
 
 
 def test_defaults_include_new_keys():

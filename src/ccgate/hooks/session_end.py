@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ccgate.ledger import compute_net
@@ -48,7 +48,7 @@ def main() -> None:
             session["ledger"] = ledger
             write_session(session_id, session)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         today = now.strftime("%Y-%m-%d")
         report_dir = ccgate_home() / "reports"
