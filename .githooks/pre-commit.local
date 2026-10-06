@@ -1,0 +1,25 @@
+#!/bin/sh
+# CCGate project-specific pre-commit checks.
+#
+# This file SURVIVES setup-commit-guard hook syncs: the canonical
+# .githooks/pre-commit runs it (if present) via its extension point, and
+# pre-commit.local is NOT in the canonical committed set that a sync overwrites.
+#
+# Lint the tree with ruff, mirroring the CI `lint` job (`ruff check .`) so local
+# and CI results match. FAIL-OPEN if ruff is not installed — a missing dev tool
+# must not block commits; the required CI `lint` job is the authoritative gate.
+
+if command -v ruff >/dev/null 2>&1; then
+    RUFF="ruff"
+elif command -v python >/dev/null 2>&1 && python -m ruff --version >/dev/null 2>&1; then
+    RUFF="python -m ruff"
+else
+    echo "[pre-commit.local] ruff not found — skipping lint (the CI lint job still enforces)." >&2
+    exit 0
+fi
+
+if ! $RUFF check . ; then
+    echo "[pre-commit.local] ruff found lint issues. Fix them, or run: $RUFF check . --fix" >&2
+    exit 1
+fi
+exit 0
