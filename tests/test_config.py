@@ -17,6 +17,12 @@ def test_bashenabled_replaces_bashcapenabled(tmp_path, monkeypatch):
     assert "bashCapEnabled" not in cfg
 
 
+def test_otel_host_default_is_loopback():
+    # otel_reader must bind loopback by default; otelHost is the escape hatch for
+    # the rare cross-host OTLP-ingestion case.
+    assert DEFAULTS["otelHost"] == "127.0.0.1"
+
+
 def test_bashreadprefixes_default_and_merge(tmp_path, monkeypatch):
     monkeypatch.setenv("CCGATE_HOME", str(tmp_path))
     (tmp_path / "config.json").write_text('{"bashReadPrefixes": ["xxd"]}', encoding="utf-8")

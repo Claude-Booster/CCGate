@@ -39,6 +39,7 @@ DEFAULTS: dict = {
     "bashCapPrefixes": ["pytest", "cargo test", "jest", "go test", "npm test", "mvn test"],
     "bashReadPrefixes": ["cat", "head", "tail", "less", "more", "sed", "awk"],
     "startupTokenCap": 12000,
+    "otelHost": "127.0.0.1",
     "otelPort": 4318,
     "digestMaxPaths": 500,
 }

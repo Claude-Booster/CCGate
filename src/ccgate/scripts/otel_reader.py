@@ -132,6 +132,9 @@ def main(argv: list[str] | None = None) -> int:
     serve_p = sub.add_parser("serve", help="Start OTLP HTTP server")
     serve_p.add_argument("--port", type=int, default=None,
                          help="Port to listen on (default: otelPort from config)")
+    serve_p.add_argument("--host", default=None,
+                         help="Interface to bind (default: otelHost from config, 127.0.0.1). "
+                              "Set 0.0.0.0 only if you must ingest OTLP from another host.")
 
     read_p = sub.add_parser("read", help="Parse a pre-exported OTLP JSON file")
     read_p.add_argument("--file", required=True, help="Path to OTLP JSON file")
@@ -156,11 +159,13 @@ def main(argv: list[str] | None = None) -> int:
     # serve mode
     cfg = load_config()
     port = args.port if args.port is not None else cfg["otelPort"]
+    # Local-only by default: OTLP metrics come from the Claude Code session on this
+    # machine, so bind loopback rather than all interfaces. otelHost / --host is the
+    # escape hatch for the rare cross-host ingestion case (e.g. set 0.0.0.0).
+    host = args.host if args.host is not None else cfg["otelHost"]
     handler = _make_handler()
-    # Local-only receiver: OTLP metrics come from the Claude Code session on this
-    # machine. Bind to loopback, not all interfaces, to avoid exposing the port.
-    server = HTTPServer(("127.0.0.1", port), handler)
-    print(f"otel_reader: listening on 127.0.0.1:{port} for POST /v1/metrics")
+    server = HTTPServer((host, port), handler)
+    print(f"otel_reader: listening on {host}:{port} for POST /v1/metrics")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
